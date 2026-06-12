@@ -60,7 +60,7 @@ impl Default for EngineConfig {
             edit_cutoff_base: 1.0,
             edit_cutoff_per_char: 0.3,
             typo_tolerance: true,
-            fuzzy_skeleton_min_len: 4,
+            fuzzy_skeleton_min_len: 3,
             weights: Weights::default(),
             costs: EditCosts::default(),
         }
@@ -289,9 +289,10 @@ impl Engine {
 
     /// Candidate generation: union of skeleton, completion, suffix and
     /// typo-tolerance buckets, deduplicated. Every source is capped at
-    /// `per_source_cap`, and all index lookups return entries most
-    /// frequent first, so the caps are principled (never alphabetical)
-    /// and worst-case work per keystroke stays bounded.
+    /// `per_source_cap` and all index lookups return entries most
+    /// frequent first, so the caps are principled (never alphabetical).
+    /// Worst-case work per keystroke is bounded by the caps plus the
+    /// `with_prefix` scan budget (see `PrefixMap::with_prefix`).
     fn collect_candidates(&self, norm: &str, input_skeleton: &str) -> Vec<EntryId> {
         let cap = self.config.per_source_cap;
         let mut seen: HashSet<EntryId> = HashSet::new();
@@ -315,9 +316,11 @@ impl Engine {
         );
         // Also try the skeleton minus its last consonant: covers inputs
         // whose final consonants diverge from the target's skeleton
-        // (`тстрн` vs `тстрвн` for тестирование).
+        // (`тстрн` vs `тстрвн` for тестирование). Gated at length 4 so the
+        // shortened prefix is never shorter than 3 chars — 2-char prefixes
+        // cover huge ranges for little recall.
         let chars: Vec<char> = input_skeleton.chars().collect();
-        if chars.len() >= 3 {
+        if chars.len() >= 4 {
             let shorter: String = chars[..chars.len() - 1].iter().collect();
             push(
                 &self.indexes.by_skeleton.with_prefix(&shorter, cap),
@@ -360,12 +363,17 @@ impl Engine {
                 take(self.indexes.skeleton_delete_bucket(&variant), &mut fuzzy);
             }
             // Keep the overall top-`cap` by frequency across the buckets.
+            // Sort ties by id and dedup: overlapping buckets yield the
+            // same id several times, and duplicates of one frequent word
+            // must not eat the cap slots meant for diverse candidates.
             fuzzy.sort_unstable_by(|&a, &b| {
                 self.lexicon
                     .get(b)
                     .freq
                     .total_cmp(&self.lexicon.get(a).freq)
+                    .then(a.cmp(&b))
             });
+            fuzzy.dedup();
             push(&fuzzy, &mut out);
         }
 

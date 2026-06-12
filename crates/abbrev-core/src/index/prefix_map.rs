@@ -1,9 +1,10 @@
 //! Ordered string → entry multimap with frequency-aware prefix scans.
 //!
 //! Buckets store `(freq_bits, id)` and are sorted by frequency (descending)
-//! once after build, so `exact` is a slice take and `with_prefix` is an
-//! exact top-k by frequency over the key range (bounded min-heap) — the
-//! caps keep the *most frequent* entries, never the alphabetically first.
+//! once after build, so `exact` is a slice take and `with_prefix` is a
+//! top-k by frequency over the key range (bounded min-heap + scan budget) —
+//! the caps keep the *most frequent* entries, never the alphabetically
+//! first, and scan work per keystroke stays bounded.
 //!
 //! A `BTreeMap` range scan is enough for the MVP scale (a few hundred
 //! thousand forms). If profiling on device shows otherwise, this is the
@@ -48,21 +49,32 @@ impl PrefixMap {
 
     /// The `cap` most frequent ids under any key starting with `prefix`.
     ///
-    /// Exact top-k: a bounded min-heap over the whole range; per-bucket
-    /// early exit relies on buckets being frequency-sorted.
+    /// Top-k by frequency via a bounded min-heap. The heap and the result
+    /// are capped; the *scan* is bounded separately by a work budget
+    /// (`cap * SCAN_BUDGET_FACTOR` examined entries): within the budget
+    /// the top-k is exact, beyond it the tail of a very wide prefix range
+    /// is dropped. With default engine caps the budget exceeds any
+    /// realistic range, so results stay exact in practice while the
+    /// worst-case latency per keystroke remains bounded.
     pub fn with_prefix(&self, prefix: &str, cap: usize) -> Vec<EntryId> {
+        const SCAN_BUDGET_FACTOR: usize = 16;
         if prefix.is_empty() || cap == 0 {
             return Vec::new();
         }
+        let mut budget = cap.saturating_mul(SCAN_BUDGET_FACTOR).max(1024);
         let mut heap: BinaryHeap<Reverse<(u32, EntryId)>> = BinaryHeap::with_capacity(cap + 1);
         let range = self
             .map
             .range::<String, _>((Bound::Included(prefix.to_string()), Bound::Unbounded));
-        for (key, bucket) in range {
+        'scan: for (key, bucket) in range {
             if !key.starts_with(prefix) {
                 break;
             }
             for &(bits, id) in bucket {
+                if budget == 0 {
+                    break 'scan;
+                }
+                budget -= 1;
                 if heap.len() < cap {
                     heap.push(Reverse((bits, id)));
                 } else if heap

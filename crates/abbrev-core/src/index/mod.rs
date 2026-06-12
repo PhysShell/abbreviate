@@ -67,6 +67,7 @@ impl Indexes {
             .into_iter()
             .map(|(key, mut bucket)| {
                 bucket.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+                bucket.dedup();
                 (key, bucket.into_iter().map(|(_, id)| id).collect())
             })
             .collect();
@@ -94,13 +95,15 @@ impl Indexes {
     }
 }
 
-/// All strings obtained by removing exactly one char from `skel`.
+/// All distinct strings obtained by removing exactly one char from `skel`.
+/// Deduplicated: repeated consonants (`ттт`) would otherwise produce the
+/// same variant several times, bloating the index and wasting cap slots.
 pub fn delete_variants(skel: &str) -> Vec<String> {
     let chars: Vec<char> = skel.chars().collect();
     if chars.len() < MIN_DELETE_SKELETON_LEN {
         return Vec::new();
     }
-    (0..chars.len())
+    let mut variants: Vec<String> = (0..chars.len())
         .map(|skip| {
             chars
                 .iter()
@@ -109,7 +112,10 @@ pub fn delete_variants(skel: &str) -> Vec<String> {
                 .map(|(_, c)| *c)
                 .collect()
         })
-        .collect()
+        .collect();
+    variants.sort_unstable();
+    variants.dedup();
+    variants
 }
 
 #[cfg(test)]
@@ -118,8 +124,15 @@ mod tests {
 
     #[test]
     fn delete_variants_remove_each_char_once() {
-        assert_eq!(delete_variants("тстр"), vec!["стр", "ттр", "тср", "тст"]);
+        assert_eq!(delete_variants("тстр"), vec!["стр", "тср", "тст", "ттр"]);
         assert!(delete_variants("тс").is_empty());
+    }
+
+    #[test]
+    fn delete_variants_are_deduplicated() {
+        // Repeated consonants must not multiply identical variants.
+        assert_eq!(delete_variants("ттт"), vec!["тт"]);
+        assert_eq!(delete_variants("ттр"), vec!["тр", "тт"]);
     }
 
     #[test]
