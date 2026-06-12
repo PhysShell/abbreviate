@@ -346,9 +346,11 @@ impl Engine {
         // substitution — both sides delete the differing char; extra char
         // on either side — one side's delete equals the other's original.
         if self.config.typo_tolerance && chars.len() >= self.config.fuzzy_skeleton_min_len {
-            // At least 1 even for tiny caps: `cap / 4` would silently
-            // disable typo tolerance for per_source_cap < 4. The final
-            // push still bounds the source's total contribution by cap.
+            // At least 1 for tiny *non-zero* caps: `cap / 4` would
+            // silently disable typo tolerance for per_source_cap in 1..4.
+            // cap = 0 stays 0 — it means "no candidates from sources" and
+            // the final push's take(cap) would drop everything anyway.
+            // The push also bounds this source's total contribution by cap.
             let per_bucket = cap.div_ceil(4);
             let mut fuzzy: Vec<EntryId> = Vec::new();
             let take = |ids: &[EntryId], fuzzy: &mut Vec<EntryId>| {
