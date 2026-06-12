@@ -51,7 +51,7 @@ fn main() -> ExitCode {
             continue;
         }
         let fields: Vec<&str> = line
-            .split(['\t', ';', ','])
+            .split(['\t', ';', ',', ' '])
             .map(str::trim)
             .filter(|f| !f.is_empty())
             .collect();

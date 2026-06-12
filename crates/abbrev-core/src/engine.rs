@@ -173,6 +173,8 @@ impl Engine {
             let signals = Signals {
                 skeleton_match,
                 suffix_compatibility: common_ending_len(&input_chars, &form_chars, 3) as f32 / 3.0,
+                prefix_agreement: common_prefix_len(&input_chars, &form_chars) as f32
+                    / input_chars.len() as f32,
                 edit_distance: distance,
                 log_frequency: (1.0 + entry.freq.max(0.0)).ln(),
                 context: self.context_model.score(context, &entry.form, &entry.lemma),
@@ -265,14 +267,27 @@ impl Engine {
     }
 
     /// Candidate generation: union of skeleton, completion and suffix
-    /// buckets, deduplicated. Each source is capped so worst-case work
-    /// per keystroke stays bounded.
+    /// buckets, deduplicated. Each source is capped so worst-case work per
+    /// keystroke stays bounded — and the cap keeps the *most frequent*
+    /// entries, not the alphabetically first ones, so a large lexicon
+    /// cannot push the right word out of the scan window.
     fn collect_candidates(&self, norm: &str, input_skeleton: &str) -> Vec<EntryId> {
         let cap = self.config.per_source_cap;
+        // Scan wider than the cap, then keep the top-`cap` by frequency.
+        let scan = cap.saturating_mul(8);
         let mut seen: HashSet<EntryId> = HashSet::new();
         let mut out: Vec<EntryId> = Vec::new();
-        let mut push_all = |ids: &[EntryId], out: &mut Vec<EntryId>| {
-            for &id in ids {
+        let mut push_source = |mut ids: Vec<EntryId>, out: &mut Vec<EntryId>| {
+            if ids.len() > cap {
+                ids.sort_unstable_by(|&a, &b| {
+                    self.lexicon
+                        .get(b)
+                        .freq
+                        .total_cmp(&self.lexicon.get(a).freq)
+                });
+                ids.truncate(cap);
+            }
+            for id in ids {
                 if seen.insert(id) {
                     out.push(id);
                 }
@@ -280,9 +295,12 @@ impl Engine {
         };
 
         // 1. Exact and prefix skeleton buckets: `првт` → привет, приват.
-        push_all(self.indexes.by_skeleton.exact(input_skeleton), &mut out);
-        push_all(
-            &self.indexes.by_skeleton.with_prefix(input_skeleton, cap),
+        push_source(
+            self.indexes.by_skeleton.exact(input_skeleton).to_vec(),
+            &mut out,
+        );
+        push_source(
+            self.indexes.by_skeleton.with_prefix(input_skeleton, scan),
             &mut out,
         );
         // Also try the skeleton minus its last consonant: covers inputs
@@ -291,14 +309,14 @@ impl Engine {
         let chars: Vec<char> = input_skeleton.chars().collect();
         if chars.len() >= 3 {
             let shorter: String = chars[..chars.len() - 1].iter().collect();
-            push_all(
-                &self.indexes.by_skeleton.with_prefix(&shorter, cap),
+            push_source(
+                self.indexes.by_skeleton.with_prefix(&shorter, scan),
                 &mut out,
             );
         }
 
         // 2. Plain completion: the input may simply be a prefix.
-        push_all(&self.indexes.by_form.with_prefix(norm, cap), &mut out);
+        push_source(self.indexes.by_form.with_prefix(norm, scan), &mut out);
 
         // 3. Suffix bucket: route by the longest known ending of the input.
         if let Some(ending) = KNOWN_ENDINGS
@@ -306,7 +324,7 @@ impl Engine {
             .filter(|e| norm.ends_with(*e))
             .max_by_key(|e| e.chars().count())
         {
-            push_all(&self.indexes.with_suffix(ending, cap), &mut out);
+            push_source(self.indexes.with_suffix(ending, scan), &mut out);
         }
 
         out

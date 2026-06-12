@@ -23,8 +23,14 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
-      - name: Offline benchmark (smoke)
+      - name: Acceptance benchmark (must stay 100%)
         run: cargo run -p abbrev-cli -- bench data/bench/basic.tsv
+      - name: Generative benchmark (5k cases on real 48k lexicon, informational)
+        run: |
+          cargo build --release -p abbrev-cli
+          ./target/release/abbrev gen --lexicon data/lexicons/ru-50k.tsv \
+            --count 5000 --seed 42 -o /tmp/gen.tsv
+          ./target/release/abbrev bench /tmp/gen.tsv --lexicon data/lexicons/ru-50k.tsv
 
   wasm:
     runs-on: ubuntu-latest

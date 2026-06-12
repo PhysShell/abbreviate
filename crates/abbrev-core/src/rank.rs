@@ -20,6 +20,9 @@
 pub struct Weights {
     pub skeleton: f32,
     pub suffix: f32,
+    /// Reward for the candidate literally starting with the typed input
+    /// (plain completion: `степ` → степени, not the fuzzier стоп).
+    pub prefix: f32,
     pub edit: f32,
     pub freq: f32,
     pub context: f32,
@@ -33,6 +36,7 @@ impl Default for Weights {
             // the user means тестирования, not the more frequent история.
             skeleton: 3.0,
             suffix: 1.0,
+            prefix: 2.0,
             edit: 1.5,
             freq: 0.6,
             context: 1.0,
@@ -52,6 +56,9 @@ pub struct Signals {
     /// Longest common ending of input and candidate, in chars, capped at 3
     /// and normalized to [0, 1].
     pub suffix_compatibility: f32,
+    /// Common char prefix of input and candidate, normalized by input
+    /// length: 1.0 means the candidate is a pure completion of the input.
+    pub prefix_agreement: f32,
     /// Weighted edit distance (lower is better).
     pub edit_distance: f32,
     /// `ln(1 + ipm)` of the candidate form.
@@ -63,7 +70,9 @@ pub struct Signals {
 }
 
 pub fn score(signals: &Signals, w: &Weights) -> f32 {
-    w.skeleton * signals.skeleton_match + w.suffix * signals.suffix_compatibility
+    w.skeleton * signals.skeleton_match
+        + w.suffix * signals.suffix_compatibility
+        + w.prefix * signals.prefix_agreement
         - w.edit * signals.edit_distance
         + w.freq * signals.log_frequency
         + w.context * signals.context
@@ -95,6 +104,7 @@ mod tests {
         let base = Signals {
             skeleton_match: 1.0,
             suffix_compatibility: 0.0,
+            prefix_agreement: 0.0,
             edit_distance: 0.5,
             log_frequency: 0.0,
             context: 0.0,

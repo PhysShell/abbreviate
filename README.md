@@ -19,8 +19,14 @@ cargo run -p abbrev-cli -- suggest првт
 # интерактивный REPL; `!1` принимает первый вариант (движок учится)
 cargo run -p abbrev-cli -- repl
 
-# офлайн-бенчмарк: top-1, top-3, латентность
+# приёмочный бенчмарк (22 кейса, регрессия контракта)
 cargo run -p abbrev-cli -- bench data/bench/basic.tsv
+
+# честный бенчмарк: 20k сгенерированных сокращений на лексиконе 48k форм
+cargo run --release -p abbrev-cli -- gen --lexicon data/lexicons/ru-50k.tsv \
+    --count 20000 --seed 42 -o /tmp/gen.tsv
+cargo run --release -p abbrev-cli -- bench /tmp/gen.tsv \
+    --lexicon data/lexicons/ru-50k.tsv
 
 # тесты и линт
 cargo test --workspace
@@ -41,7 +47,9 @@ cargo clippy --workspace --all-targets
 
 ## Состояние
 
-Каркас: ядро с пятью слоями работает (22+ тестов, бенчмарк на сид-наборе —
-top-3 100%, p95 ≈ 1 мс на демо-лексиконе), FFI/WASM-обвязки собираются.
-Следующие шаги — импортёр OpenCorpora, тюнинг весов на большом лексиконе,
-Android-оболочка. Дорожная карта — в конце ARCHITECTURE.md.
+Ядро с пятью слоями работает; на реальном лексиконе из 48k словоформ и 20 000
+сгенерированных сокращений — **top-1 71.8%, top-3 85.1%, p95 ≈ 3 мс**
+(подробности и анализ провалов — в [docs/BENCHMARKS.md](docs/BENCHMARKS.md);
+флагманский сценарий «скелет + окончание» — 93.5% top-1). FFI/WASM-обвязки
+собираются. Следующие шаги — леммы из OpenCorpora, delete-индекс для опечаток,
+контекстная модель, Android-оболочка. Дорожная карта — в конце ARCHITECTURE.md.

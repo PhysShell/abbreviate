@@ -3,9 +3,13 @@
 //! ```text
 //! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"]
 //! abbrev repl [--lexicon path.tsv]
-//! abbrev bench data/bench/basic.tsv [--lexicon path.tsv]
+//! abbrev bench data/bench/basic.tsv [--lexicon path.tsv] [--errors fails.tsv]
+//! abbrev gen --lexicon path.tsv --count 20000 --seed 42 -o cases.tsv
 //! ```
 
+mod generate;
+
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write as _};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -19,8 +23,9 @@ fn main() -> ExitCode {
         Some("suggest") => cmd_suggest(args.collect()),
         Some("repl") => cmd_repl(args.collect()),
         Some("bench") => cmd_bench(args.collect()),
+        Some("gen") => generate::cmd_gen(args.collect()),
         _ => {
-            eprintln!("usage: abbrev <suggest|repl|bench> [args]  (see crates/abbrev-cli)");
+            eprintln!("usage: abbrev <suggest|repl|bench|gen> [args]  (see crates/abbrev-cli)");
             ExitCode::FAILURE
         }
     }
@@ -136,10 +141,21 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Benchmark over `input<TAB>expected` lines: top-1 accuracy, top-3 recall,
-/// mean and p95 latency — the non-negotiable metrics of the project.
+/// Benchmark over `input<TAB>expected[<TAB>tag]` lines: top-1 accuracy,
+/// top-3 recall, latency — overall and per corruption-rule tag.
+/// `--errors path` dumps the failing cases for analysis.
 fn cmd_bench(args: Vec<&str>) -> ExitCode {
-    let opts = match parse_opts(args) {
+    let mut errors_path: Option<String> = None;
+    let mut rest: Vec<&str> = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(arg) = it.next() {
+        if arg == "--errors" {
+            errors_path = it.next().map(String::from);
+        } else {
+            rest.push(arg);
+        }
+    }
+    let opts = match parse_opts(rest) {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
@@ -152,24 +168,37 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
     };
     let engine = Engine::new(opts.lexicon);
     let (mut total, mut top1, mut top3) = (0u32, 0u32, 0u32);
+    let mut by_tag: BTreeMap<String, (u32, u32, u32)> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
+    let mut errors = String::new();
     for line in cases.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let Some((input, expected)) = line.split_once('\t') else {
+        let mut fields = line.split('\t');
+        let (Some(input), Some(expected)) = (fields.next(), fields.next()) else {
             return fail(&format!("bad bench line (need input\\texpected): {line}"));
         };
+        let tag = fields.next().unwrap_or("untagged");
         let started = Instant::now();
         let suggestions = engine.suggest(input, &opts.context, 3);
         latencies_us.push(started.elapsed().as_micros());
         total += 1;
-        if suggestions.first().is_some_and(|s| s.form == expected) {
+        let hit1 = suggestions.first().is_some_and(|s| s.form == expected);
+        let hit3 = suggestions.iter().any(|s| s.form == expected);
+        let entry = by_tag.entry(tag.to_string()).or_insert((0, 0, 0));
+        entry.0 += 1;
+        if hit1 {
             top1 += 1;
+            entry.1 += 1;
         }
-        if suggestions.iter().any(|s| s.form == expected) {
+        if hit3 {
             top3 += 1;
+            entry.2 += 1;
+        } else if errors_path.is_some() {
+            let got: Vec<&str> = suggestions.iter().map(|s| s.form.as_str()).collect();
+            errors.push_str(&format!("{input}\t{expected}\t{tag}\t{}\n", got.join("|")));
         }
     }
     if total == 0 {
@@ -178,16 +207,27 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
     latencies_us.sort_unstable();
     let mean = latencies_us.iter().sum::<u128>() / latencies_us.len() as u128;
     let p95 = latencies_us[(latencies_us.len() * 95 / 100).min(latencies_us.len() - 1)];
+    let pct = |hits: u32, n: u32| 100.0 * f64::from(hits) / f64::from(n.max(1));
     println!("cases:      {total}");
-    println!(
-        "top-1:      {:.1}%",
-        100.0 * f64::from(top1) / f64::from(total)
-    );
-    println!(
-        "top-3:      {:.1}%",
-        100.0 * f64::from(top3) / f64::from(total)
-    );
+    println!("top-1:      {:.1}%", pct(top1, total));
+    println!("top-3:      {:.1}%", pct(top3, total));
     println!("latency:    mean {mean} µs, p95 {p95} µs");
+    if by_tag.len() > 1 {
+        println!("per tag:");
+        for (tag, (n, t1, t3)) in &by_tag {
+            println!(
+                "  {tag:<10} n={n:<6} top-1 {:.1}%  top-3 {:.1}%",
+                pct(*t1, *n),
+                pct(*t3, *n)
+            );
+        }
+    }
+    if let Some(path) = errors_path {
+        if let Err(e) = std::fs::write(&path, errors) {
+            return fail(&format!("cannot write {path}: {e}"));
+        }
+        eprintln!("top-3 misses dumped to {path}");
+    }
     ExitCode::SUCCESS
 }
 
