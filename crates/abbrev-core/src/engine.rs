@@ -346,7 +346,10 @@ impl Engine {
         // substitution — both sides delete the differing char; extra char
         // on either side — one side's delete equals the other's original.
         if self.config.typo_tolerance && chars.len() >= self.config.fuzzy_skeleton_min_len {
-            let per_bucket = cap / 4;
+            // At least 1 even for tiny caps: `cap / 4` would silently
+            // disable typo tolerance for per_source_cap < 4. The final
+            // push still bounds the source's total contribution by cap.
+            let per_bucket = cap.div_ceil(4);
             let mut fuzzy: Vec<EntryId> = Vec::new();
             let take = |ids: &[EntryId], fuzzy: &mut Vec<EntryId>| {
                 fuzzy.extend_from_slice(&ids[..ids.len().min(per_bucket)]);
@@ -461,6 +464,23 @@ mod tests {
         let strict = Engine::with_config(Lexicon::demo(), config);
         let top = top_forms(&strict, "кмртер", 3);
         assert!(!top.iter().any(|f| f == "компьютер"), "got {top:?}");
+    }
+
+    #[test]
+    fn tiny_cap_keeps_typo_tolerance_alive() {
+        // per_source_cap < 4 must not zero out the per-bucket take and
+        // silently disable fuzzy retrieval (review finding).
+        let config = EngineConfig {
+            per_source_cap: 2,
+            ..EngineConfig::default()
+        };
+        let engine = Engine::with_config(Lexicon::demo(), config);
+        let top: Vec<String> = engine
+            .suggest("кмртер", &Context::default(), 3)
+            .into_iter()
+            .map(|s| s.form)
+            .collect();
+        assert!(top.iter().any(|f| f == "компьютер"), "got {top:?}");
     }
 
     #[test]
