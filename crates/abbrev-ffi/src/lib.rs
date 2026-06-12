@@ -20,6 +20,15 @@ pub struct Suggestion {
     pub score: f64,
 }
 
+/// One lemma group for the two-level suggestion strip: tap inserts `best`,
+/// hold expands `variants` (sibling forms of the same lemma).
+#[derive(uniffi::Record)]
+pub struct SuggestionGroup {
+    pub lemma: String,
+    pub best: Suggestion,
+    pub variants: Vec<String>,
+}
+
 #[derive(Debug, uniffi::Error)]
 pub enum AbbrevError {
     InvalidLexicon { message: String },
@@ -81,6 +90,32 @@ impl AbbrevEngine {
                 form: s.form,
                 lemma: s.lemma,
                 score: f64::from(s.score),
+            })
+            .collect()
+    }
+
+    /// Two-level suggestions: one group per lemma (the candidate strip),
+    /// each with the best form for the typed ending plus hold-variants.
+    pub fn suggest_grouped(
+        &self,
+        input: String,
+        previous_words: Vec<String>,
+        limit: u32,
+    ) -> Vec<SuggestionGroup> {
+        let context = Context::new(previous_words);
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .suggest_grouped(&input, &context, limit as usize)
+            .into_iter()
+            .map(|g| SuggestionGroup {
+                lemma: g.lemma,
+                best: Suggestion {
+                    form: g.best.form,
+                    lemma: g.best.lemma,
+                    score: f64::from(g.best.score),
+                },
+                variants: g.variants,
             })
             .collect()
     }

@@ -13,7 +13,7 @@ use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
 use crate::index::Indexes;
 use crate::lexicon::{EntryId, Lexicon};
-use crate::rank::{Signals, Weights, common_ending_len, score};
+use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
 
 /// Endings used to route an input like `тстрние` into the right
 /// reverse-suffix bucket. Ordered longest-first at lookup time.
@@ -69,6 +69,19 @@ pub struct Suggestion {
     pub score: f32,
 }
 
+/// Two-level candidate model for the suggestion strip:
+/// horizontally — different lemmas, vertically (on hold) — forms of one.
+/// `best` is chosen by the ranking, i.e. the typed ending picks the form
+/// (`тстрние` → тестирование, `тстрния` → тестирования).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuggestionGroup {
+    pub lemma: String,
+    /// Best form of this lemma for the current input; inserted on tap.
+    pub best: Suggestion,
+    /// Sibling forms for the hold-to-expand list, most frequent first.
+    pub variants: Vec<String>,
+}
+
 pub struct Engine {
     lexicon: Lexicon,
     indexes: Indexes,
@@ -116,13 +129,19 @@ impl Engine {
     }
 
     /// Ranked suggestions for a (possibly abbreviated) input.
+    ///
+    /// Protected input rule: anything that is not a plain Russian word —
+    /// digits, Latin letters, `_`, `@`, URLs, code — is left untouched
+    /// (returns no suggestions).
     pub fn suggest(&self, input: &str, context: &Context, limit: usize) -> Vec<Suggestion> {
         let norm = normalize(input.trim());
         let input_chars: Vec<char> = norm.chars().collect();
-        if input_chars.len() < self.config.min_input_len || limit == 0 {
+        if input_chars.len() < self.config.min_input_len || limit == 0 || !is_protected_safe(&norm)
+        {
             return Vec::new();
         }
         let input_skeleton = skeleton(&norm);
+        let skeleton_chars: Vec<char> = input_skeleton.chars().collect();
         let cutoff = self.config.edit_cutoff_base
             + self.config.edit_cutoff_per_char * input_chars.len() as f32;
 
@@ -137,12 +156,19 @@ impl Engine {
                 continue;
             };
             let form_skeleton = skeleton(&form_norm);
+            // Graded stem agreement: exact skeleton match is 1.0, otherwise
+            // the share of the input skeleton matched from the first letter
+            // (`тстрн` vs `тстрвн` → 0.8; `тстрн` vs `нстрн` → 0.0). Users
+            // keep the leading consonants of the stem, so this separates
+            // тестирование from настроение for `тстрние`.
             let skeleton_match = if form_skeleton == input_skeleton {
                 1.0
-            } else if form_skeleton.starts_with(&input_skeleton) {
-                0.5
-            } else {
+            } else if skeleton_chars.is_empty() {
                 0.0
+            } else {
+                let form_skeleton_chars: Vec<char> = form_skeleton.chars().collect();
+                common_prefix_len(&skeleton_chars, &form_skeleton_chars) as f32
+                    / skeleton_chars.len() as f32
             };
             let signals = Signals {
                 skeleton_match,
@@ -168,6 +194,40 @@ impl Engine {
                 }
             })
             .collect()
+    }
+
+    /// Two-level suggestions: one group per lemma, in ranking order.
+    /// The strip renders `best` per group; hold expands `variants`.
+    pub fn suggest_grouped(
+        &self,
+        input: &str,
+        context: &Context,
+        limit: usize,
+    ) -> Vec<SuggestionGroup> {
+        // Over-fetch so that sibling forms of one lemma don't crowd out
+        // other lemmas from the strip.
+        let flat = self.suggest(input, context, limit.saturating_mul(4));
+        let mut seen_lemmas: HashSet<String> = HashSet::new();
+        let mut groups = Vec::new();
+        for suggestion in flat {
+            if !seen_lemmas.insert(normalize(&suggestion.lemma)) {
+                continue;
+            }
+            let variants = self
+                .forms_of_lemma(&suggestion.lemma)
+                .into_iter()
+                .filter(|form| *form != suggestion.form)
+                .collect();
+            groups.push(SuggestionGroup {
+                lemma: suggestion.lemma.clone(),
+                best: suggestion,
+                variants,
+            });
+            if groups.len() == limit {
+                break;
+            }
+        }
+        groups
     }
 
     /// All forms of a lemma, most frequent first — backs the
@@ -253,6 +313,13 @@ impl Engine {
     }
 }
 
+/// "Если не уверен — не трогай": the engine only ever reasons about plain
+/// Russian words. Numbers, Latin, identifiers, e-mails and URLs are the
+/// user's business.
+fn is_protected_safe(norm: &str) -> bool {
+    norm.chars().all(|c| matches!(c, 'а'..='я' | 'ё' | '-'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,12 +349,50 @@ mod tests {
     }
 
     #[test]
-    fn suffix_route_recovers_long_word() {
-        let top = top_forms(&engine(), "тстрние", 3);
+    fn typed_ending_picks_the_form() {
+        // The ending encoded in the abbreviation must select the surface
+        // form: тстрниЕ → тестированиЕ, тстрниЯ → тестированиЯ, etc.
+        let e = engine();
+        assert_eq!(top_forms(&e, "тстрние", 1), vec!["тестирование"]);
+        assert_eq!(top_forms(&e, "тстрния", 1), vec!["тестирования"]);
+        assert_eq!(top_forms(&e, "тстрнию", 1), vec!["тестированию"]);
+    }
+
+    #[test]
+    fn protected_input_is_untouched() {
+        let e = engine();
+        for input in [
+            "api_key",
+            "прив3т",
+            "test@mail.ru",
+            "https://пример.рф",
+            "x21",
+        ] {
+            assert!(
+                e.suggest(input, &Context::default(), 5).is_empty(),
+                "{input} must produce no suggestions"
+            );
+        }
+        // Hyphenated Russian words are still fair game.
+        assert!(is_protected_safe("кто-то"));
+    }
+
+    #[test]
+    fn grouped_suggestions_collapse_lemmas() {
+        let groups = engine().suggest_grouped("тстрние", &Context::default(), 3);
+        let first = groups.first().expect("at least one group");
+        assert_eq!(first.lemma, "тестирование");
+        assert_eq!(first.best.form, "тестирование");
         assert!(
-            top.iter().any(|f| f == "тестирование"),
-            "expected тестирование in top-3, got {top:?}"
+            first.variants.iter().any(|f| f == "тестирования"),
+            "hold list must contain sibling forms, got {:?}",
+            first.variants
         );
+        // One group per lemma: no lemma appears twice in the strip.
+        let mut lemmas: Vec<&str> = groups.iter().map(|g| g.lemma.as_str()).collect();
+        lemmas.sort_unstable();
+        lemmas.dedup();
+        assert_eq!(lemmas.len(), groups.len());
     }
 
     #[test]

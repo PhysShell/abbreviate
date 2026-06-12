@@ -29,7 +29,9 @@ pub struct Weights {
 impl Default for Weights {
     fn default() -> Self {
         Self {
-            skeleton: 2.0,
+            // The stem skeleton must outweigh raw frequency: for `тстрния`
+            // the user means тестирования, not the more frequent история.
+            skeleton: 3.0,
             suffix: 1.0,
             edit: 1.5,
             freq: 0.6,
@@ -42,8 +44,10 @@ impl Default for Weights {
 /// Per-candidate signals collected by the engine before scoring.
 #[derive(Debug, Clone, Copy)]
 pub struct Signals {
-    /// 1.0 — input skeleton equals candidate skeleton, 0.5 — proper prefix,
-    /// 0.0 — neither.
+    /// Graded skeleton agreement in [0, 1]: 1.0 — input skeleton equals the
+    /// candidate's, otherwise the common-prefix share of the input skeleton
+    /// (`тстрн` vs `тстрвн` → 4/5). Users keep the first letters of the stem,
+    /// so prefix agreement of skeletons is the strongest stem signal.
     pub skeleton_match: f32,
     /// Longest common ending of input and candidate, in chars, capped at 3
     /// and normalized to [0, 1].
@@ -64,6 +68,11 @@ pub fn score(signals: &Signals, w: &Weights) -> f32 {
         + w.freq * signals.log_frequency
         + w.context * signals.context
         + w.user * signals.user_prior
+}
+
+/// Longest common prefix of two char slices.
+pub fn common_prefix_len(a: &[char], b: &[char]) -> usize {
+    a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count()
 }
 
 /// Longest common ending of two char slices, capped at `cap`.
@@ -96,6 +105,15 @@ mod tests {
             ..base
         };
         assert!(score(&frequent, &w) > score(&base, &w));
+    }
+
+    #[test]
+    fn common_prefix() {
+        let a: Vec<char> = "тстрн".chars().collect();
+        let b: Vec<char> = "тстрвн".chars().collect();
+        assert_eq!(common_prefix_len(&a, &b), 4);
+        let c: Vec<char> = "нстрн".chars().collect();
+        assert_eq!(common_prefix_len(&a, &c), 0);
     }
 
     #[test]

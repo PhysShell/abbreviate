@@ -34,6 +34,6 @@ pub mod rank;
 
 pub use context::{Context, ContextModel, NoContext};
 pub use edit::EditCosts;
-pub use engine::{Engine, EngineConfig, Suggestion};
+pub use engine::{Engine, EngineConfig, Suggestion, SuggestionGroup};
 pub use lexicon::{Lexicon, LexiconEntry, LexiconError};
 pub use rank::Weights;

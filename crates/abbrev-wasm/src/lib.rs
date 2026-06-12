@@ -15,6 +15,13 @@ struct JsSuggestion<'a> {
     score: f32,
 }
 
+#[derive(Serialize)]
+struct JsSuggestionGroup<'a> {
+    lemma: &'a str,
+    best: JsSuggestion<'a>,
+    variants: &'a [String],
+}
+
 #[wasm_bindgen]
 pub struct WasmEngine {
     inner: Engine,
@@ -51,6 +58,31 @@ impl WasmEngine {
                 form: &s.form,
                 lemma: &s.lemma,
                 score: s.score,
+            })
+            .collect();
+        serde_json::to_string(&view).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Two-level suggestions as JSON: `[{lemma, best: {form, lemma, score},
+    /// variants: [...]}, ...]` — one group per lemma for the candidate strip.
+    pub fn suggest_grouped_json(&self, input: &str, previous_words: &str, limit: usize) -> String {
+        let context = Context::new(
+            previous_words
+                .split_whitespace()
+                .map(String::from)
+                .collect(),
+        );
+        let groups = self.inner.suggest_grouped(input, &context, limit);
+        let view: Vec<JsSuggestionGroup<'_>> = groups
+            .iter()
+            .map(|g| JsSuggestionGroup {
+                lemma: &g.lemma,
+                best: JsSuggestion {
+                    form: &g.best.form,
+                    lemma: &g.best.lemma,
+                    score: g.best.score,
+                },
+                variants: &g.variants,
             })
             .collect();
         serde_json::to_string(&view).unwrap_or_else(|_| "[]".to_string())
