@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+# wasm-pack output
+/crates/abbrev-wasm/pkg
+# generated bindings
+/platforms/android/app/src/main/jniLibs
+/platforms/android/app/src/main/kotlin/uniffi
+# local artifacts
+*.lex.tsv
+.DS_Store

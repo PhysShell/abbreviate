@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/abbrev-core",
+    "crates/abbrev-cli",
+    "crates/abbrev-ffi",
+    "crates/abbrev-wasm",
+    "tools/lexicon-builder",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/PhysShell/abbreviate"
+authors = ["PhysShell"]
+
+[workspace.dependencies]
+abbrev-core = { path = "crates/abbrev-core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

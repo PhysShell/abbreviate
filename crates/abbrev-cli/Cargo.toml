@@ -1,0 +1,16 @@
+[package]
+name = "abbrev-cli"
+description = "Developer CLI for the abbreviation engine: suggest, REPL and offline benchmark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "abbrev"
+path = "src/main.rs"
+
+[dependencies]
+abbrev-core = { workspace = true }

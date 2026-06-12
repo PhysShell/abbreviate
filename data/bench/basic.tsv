@@ -1,0 +1,23 @@
+# Offline benchmark seed: input<TAB>expected surface form.
+# Covers vowel omission, signs, inflected targets, typos and transpositions.
+# Run: cargo run -p abbrev-cli -- bench data/bench/basic.tsv
+првт	привет
+спсбо	спасибо
+сгдня	сегодня
+звтра	завтра
+члвк	человек
+врмя	время
+рбта	работа
+рбту	работу
+хршо	хорошо
+впрс	вопрос
+тлфн	телефон
+кмптер	компьютер
+пргрмма	программа
+тстрние	тестирование
+тстрвния	тестирования
+сбщние	сообщение
+нвсти	новости
+знние	знание
+превет	привет
+пирвет	привет

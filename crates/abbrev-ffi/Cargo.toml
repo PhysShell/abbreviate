@@ -1,0 +1,20 @@
+[package]
+name = "abbrev-ffi"
+description = "UniFFI bindings of the abbreviation engine for Kotlin (Android IME), Swift (iOS) and Python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# cdylib → Android (.so), staticlib → iOS (.a), lib → tests/host tooling.
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[dependencies]
+abbrev-core = { workspace = true }
+uniffi = "0.29"
+
+[dev-dependencies]
+uniffi = { version = "0.29", features = ["bindgen-tests"] }

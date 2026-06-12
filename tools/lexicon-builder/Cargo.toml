@@ -1,0 +1,12 @@
+[package]
+name = "lexicon-builder"
+description = "Builds engine lexicons (form/lemma/freq TSV) from raw word lists; OpenCorpora/RNC importers land here"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+abbrev-core = { workspace = true }

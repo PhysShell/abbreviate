@@ -1,0 +1,13 @@
+[package]
+name = "abbrev-core"
+description = "Offline engine for Russian abbreviation expansion: lexicon, indexes, weighted edit distance, ranking, personalization"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# Intentionally zero runtime dependencies: the core must stay small,
+# deterministic and portable (Android, iOS, WASM, desktop).
+[dependencies]

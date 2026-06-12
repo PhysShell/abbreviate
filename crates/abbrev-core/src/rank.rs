@@ -1,0 +1,109 @@
+//! Candidate scoring: a linear synthesis of the signals validated by the
+//! spelling-correction / IME literature.
+//!
+//! ```text
+//! score(candidate) =
+//!   w_skel  * skeleton_match
+//! + w_suf   * suffix_compatibility
+//! - w_edit  * weighted_edit_distance
+//! + w_freq  * log_frequency
+//! + w_ctx   * context_lm_score
+//! + w_user  * user_history_prior
+//! ```
+//!
+//! Morphological plausibility (`w_morph`) is reserved for the stage where a
+//! paradigm-aware lexicon lands; until then suffix compatibility carries it.
+
+/// Weights of the linear ranking model. Tuned on the offline benchmark
+/// (`abbrev-cli bench`), not by intuition.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Weights {
+    pub skeleton: f32,
+    pub suffix: f32,
+    pub edit: f32,
+    pub freq: f32,
+    pub context: f32,
+    pub user: f32,
+}
+
+impl Default for Weights {
+    fn default() -> Self {
+        Self {
+            skeleton: 2.0,
+            suffix: 1.0,
+            edit: 1.5,
+            freq: 0.6,
+            context: 1.0,
+            user: 1.0,
+        }
+    }
+}
+
+/// Per-candidate signals collected by the engine before scoring.
+#[derive(Debug, Clone, Copy)]
+pub struct Signals {
+    /// 1.0 — input skeleton equals candidate skeleton, 0.5 — proper prefix,
+    /// 0.0 — neither.
+    pub skeleton_match: f32,
+    /// Longest common ending of input and candidate, in chars, capped at 3
+    /// and normalized to [0, 1].
+    pub suffix_compatibility: f32,
+    /// Weighted edit distance (lower is better).
+    pub edit_distance: f32,
+    /// `ln(1 + ipm)` of the candidate form.
+    pub log_frequency: f32,
+    /// Context-model score (0.0 when no model is plugged in).
+    pub context: f32,
+    /// User-history prior.
+    pub user_prior: f32,
+}
+
+pub fn score(signals: &Signals, w: &Weights) -> f32 {
+    w.skeleton * signals.skeleton_match + w.suffix * signals.suffix_compatibility
+        - w.edit * signals.edit_distance
+        + w.freq * signals.log_frequency
+        + w.context * signals.context
+        + w.user * signals.user_prior
+}
+
+/// Longest common ending of two char slices, capped at `cap`.
+pub fn common_ending_len(a: &[char], b: &[char], cap: usize) -> usize {
+    a.iter()
+        .rev()
+        .zip(b.iter().rev())
+        .take(cap)
+        .take_while(|(x, y)| x == y)
+        .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frequency_breaks_ties() {
+        let w = Weights::default();
+        let base = Signals {
+            skeleton_match: 1.0,
+            suffix_compatibility: 0.0,
+            edit_distance: 0.5,
+            log_frequency: 0.0,
+            context: 0.0,
+            user_prior: 0.0,
+        };
+        let frequent = Signals {
+            log_frequency: 5.0,
+            ..base
+        };
+        assert!(score(&frequent, &w) > score(&base, &w));
+    }
+
+    #[test]
+    fn common_ending() {
+        let a: Vec<char> = "тстрние".chars().collect();
+        let b: Vec<char> = "тестирование".chars().collect();
+        assert_eq!(common_ending_len(&a, &b, 3), 3);
+        let c: Vec<char> = "привет".chars().collect();
+        assert_eq!(common_ending_len(&a, &c, 3), 0);
+    }
+}
