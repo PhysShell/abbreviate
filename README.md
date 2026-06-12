@@ -53,6 +53,9 @@ cargo clippy --workspace --all-targets
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md); флагманский сценарий «скелет +
 окончание» — 93.6% top-1, опечатки закрыты SymSpell delete-индексом:
 74.9% top-3).
-FFI/WASM-обвязки собираются. Следующие шаги — леммы из OpenCorpora,
-контекстная модель, Android-оболочка. Дорожная карта — в конце
-ARCHITECTURE.md.
+Боевой лексикон лемматизирован (pymorphy3/OpenCorpora: 18 636 лемм), так что
+двухуровневая лента работает на реальных данных:
+`abbrev suggest рбте --grouped --lexicon data/lexicons/ru-50k.tsv` →
+`работе | hold: работу работа работы…`. FFI/WASM-обвязки собираются.
+Следующие шаги — контекстная модель, Android-оболочка. Дорожная карта — в
+конце ARCHITECTURE.md.

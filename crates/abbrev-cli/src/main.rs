@@ -1,7 +1,7 @@
 //! Developer CLI: the fastest feedback loop for engine work.
 //!
 //! ```text
-//! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"]
+//! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped]
 //! abbrev repl [--lexicon path.tsv]
 //! abbrev bench data/bench/basic.tsv [--lexicon path.tsv] [--errors fails.tsv]
 //! abbrev gen --lexicon path.tsv --count 20000 --seed 42 -o cases.tsv
@@ -80,6 +80,8 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
 }
 
 fn cmd_suggest(args: Vec<&str>) -> ExitCode {
+    let grouped = args.contains(&"--grouped");
+    let args = args.into_iter().filter(|a| *a != "--grouped").collect();
     let opts = match parse_opts(args) {
         Ok(o) => o,
         Err(e) => return fail(&e),
@@ -89,6 +91,27 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
     };
     let engine = Engine::new(opts.lexicon);
     let started = Instant::now();
+    if grouped {
+        // The two-level strip: one line per lemma, variants on "hold".
+        let groups = engine.suggest_grouped(input, &opts.context, opts.limit);
+        let elapsed = started.elapsed();
+        for (i, g) in groups.iter().enumerate() {
+            let variants = if g.variants.is_empty() {
+                String::new()
+            } else {
+                format!("  | hold: {}", g.variants.join(" "))
+            };
+            println!(
+                "{:>2}. {:<20} (лемма: {}, score: {:.2}){variants}",
+                i + 1,
+                g.best.form,
+                g.lemma,
+                g.best.score
+            );
+        }
+        eprintln!("-- {} groups in {:?}", groups.len(), elapsed);
+        return ExitCode::SUCCESS;
+    }
     let suggestions = engine.suggest(input, &opts.context, opts.limit);
     let elapsed = started.elapsed();
     for (i, s) in suggestions.iter().enumerate() {
