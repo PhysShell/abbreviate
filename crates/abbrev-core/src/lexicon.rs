@@ -61,6 +61,14 @@ impl Lexicon {
                     });
                 }
             };
+            // Fail fast on extra columns: they signal an incompatible
+            // artifact version or a broken generator, not optional data.
+            if parts.next().is_some() {
+                return Err(LexiconError {
+                    line: i + 1,
+                    message: format!("unexpected extra column in `{raw}`"),
+                });
+            }
             let freq: f32 = freq.trim().parse().map_err(|_| LexiconError {
                 line: i + 1,
                 message: format!("bad frequency `{freq}`"),
@@ -116,6 +124,8 @@ mod tests {
     fn rejects_malformed_lines() {
         assert!(Lexicon::from_tsv_str("привет").is_err());
         assert!(Lexicon::from_tsv_str("привет\tпривет\tмного").is_err());
+        // Extra columns mean a broken or incompatible artifact.
+        assert!(Lexicon::from_tsv_str("привет\tпривет\t1.0\tлишнее").is_err());
     }
 
     #[test]
