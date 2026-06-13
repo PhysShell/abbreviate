@@ -469,6 +469,27 @@ mod tests {
     }
 
     #[test]
+    fn context_model_flips_ambiguous_expansion() {
+        // The dialogue acceptance case: `ну првт` means привет, while
+        // `в првт (канал)` means приват — a bigram model must override
+        // the raw frequency prior (привет is 15x more frequent).
+        use crate::ngram::BigramModel;
+        let lm = "#abbrev-lm v1\nu\tв\t1000\nu\tну\t1000\nu\tпривет\t200\n\
+                  u\tприват\t20\nb\tв\tприват\t200\nb\tну\tпривет\t150\n";
+        let mut e = engine();
+        e.set_context_model(Box::new(BigramModel::from_tsv_str(lm).unwrap()));
+        let with_ctx = |ctx_word: &str| {
+            e.suggest("првт", &Context::new(vec![ctx_word.to_string()]), 1)
+                .first()
+                .map(|s| s.form.clone())
+        };
+        assert_eq!(with_ctx("ну").as_deref(), Some("привет"));
+        assert_eq!(with_ctx("в").as_deref(), Some("приват"));
+        // No context: frequency wins as before.
+        assert_eq!(e.suggest("првт", &Context::default(), 1)[0].form, "привет");
+    }
+
+    #[test]
     fn tiny_cap_keeps_typo_tolerance_alive() {
         // per_source_cap < 4 must not zero out the per-bucket take and
         // silently disable fuzzy retrieval (review finding).

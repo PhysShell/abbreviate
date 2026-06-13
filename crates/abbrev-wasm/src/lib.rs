@@ -4,7 +4,7 @@
 //!
 //! Build: `wasm-pack build crates/abbrev-wasm --target web`.
 
-use abbrev_core::{Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -92,6 +92,13 @@ impl WasmEngine {
     pub fn forms_of_lemma_json(&self, lemma: &str) -> String {
         serde_json::to_string(&self.inner.forms_of_lemma(lemma))
             .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Plugs in a bigram language model (`#abbrev-lm v1` TSV artifact).
+    pub fn load_language_model(&mut self, tsv: &str) -> Result<(), JsError> {
+        let model = BigramModel::from_tsv_str(tsv).map_err(|e| JsError::new(&e.to_string()))?;
+        self.inner.set_context_model(Box::new(model));
+        Ok(())
     }
 
     pub fn accept(&mut self, input: &str, form: &str) {

@@ -14,7 +14,7 @@ use std::io::{BufRead, Write as _};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use abbrev_core::{Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -33,13 +33,25 @@ fn main() -> ExitCode {
 
 struct CommonOpts {
     lexicon: Lexicon,
+    lm: Option<BigramModel>,
     limit: usize,
     context: Context,
     positional: Vec<String>,
 }
 
+/// Engine over the options' lexicon, with the bigram LM plugged in when
+/// `--lm` was given.
+fn build_engine(lexicon: Lexicon, lm: Option<BigramModel>) -> Engine {
+    let mut engine = Engine::new(lexicon);
+    if let Some(lm) = lm {
+        engine.set_context_model(Box::new(lm));
+    }
+    engine
+}
+
 fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut lexicon_path: Option<String> = None;
+    let mut lm_path: Option<String> = None;
     let mut limit = 5usize;
     let mut context = Context::default();
     let mut positional = Vec::new();
@@ -48,6 +60,9 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         match arg {
             "--lexicon" => {
                 lexicon_path = Some(it.next().ok_or("--lexicon needs a path")?.to_string());
+            }
+            "--lm" => {
+                lm_path = Some(it.next().ok_or("--lm needs a path")?.to_string());
             }
             "--limit" => {
                 limit = it
@@ -71,8 +86,17 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => Lexicon::demo(),
     };
+    let lm = match lm_path {
+        Some(path) => {
+            let tsv = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read lm {path}: {e}"))?;
+            Some(BigramModel::from_tsv_str(&tsv).map_err(|e| e.to_string())?)
+        }
+        None => None,
+    };
     Ok(CommonOpts {
         lexicon,
+        lm,
         limit,
         context,
         positional,
@@ -89,7 +113,7 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
     let Some(input) = opts.positional.first() else {
         return fail("suggest needs an input word, e.g. `abbrev suggest првт`");
     };
-    let engine = Engine::new(opts.lexicon);
+    let engine = build_engine(opts.lexicon, opts.lm);
     let started = Instant::now();
     if grouped {
         // The two-level strip: one line per lemma, variants on "hold".
@@ -132,7 +156,7 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let mut engine = Engine::new(opts.lexicon);
+    let mut engine = build_engine(opts.lexicon, opts.lm);
     eprintln!("abbrev repl — введите сокращение; `!N` принимает вариант N; пустая строка — выход");
     let stdin = std::io::stdin();
     let mut last_input = String::new();
@@ -164,8 +188,10 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Benchmark over `input<TAB>expected[<TAB>tag]` lines: top-1 accuracy,
-/// top-3 recall, latency — overall and per corruption-rule tag.
+/// Benchmark over `input<TAB>expected[<TAB>tag[<TAB>context]]` lines:
+/// top-1 accuracy, top-3 recall, latency — overall and per
+/// corruption-rule tag. The optional 4th column is left context
+/// (space-separated previous words) fed to the engine per case.
 /// `--errors path` dumps the failing cases for analysis.
 fn cmd_bench(args: Vec<&str>) -> ExitCode {
     let mut errors_path: Option<String> = None;
@@ -189,7 +215,7 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
-    let engine = Engine::new(opts.lexicon);
+    let engine = build_engine(opts.lexicon, opts.lm);
     let (mut total, mut top1, mut top3) = (0u32, 0u32, 0u32);
     let mut by_tag: BTreeMap<String, (u32, u32, u32)> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
@@ -204,8 +230,12 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
             return fail(&format!("bad bench line (need input\\texpected): {line}"));
         };
         let tag = fields.next().unwrap_or("untagged");
+        let case_context = fields
+            .next()
+            .map(|words| Context::new(words.split_whitespace().map(String::from).collect()));
+        let context = case_context.as_ref().unwrap_or(&opts.context);
         let started = Instant::now();
-        let suggestions = engine.suggest(input, &opts.context, 3);
+        let suggestions = engine.suggest(input, context, 3);
         latencies_us.push(started.elapsed().as_micros());
         total += 1;
         let hit1 = suggestions.first().is_some_and(|s| s.form == expected);
