@@ -18,6 +18,15 @@ def main() -> int:
     if len(sys.argv) != 2:
         print("usage: lemmatize.py <lexicon.tsv>", file=sys.stderr)
         return 1
+    path = sys.argv[1]
+    # Validate the input before the heavy import: a bad path should be
+    # reported as such, not as a missing dependency.
+    try:
+        probe = open(path, encoding="utf-8")
+    except OSError as e:
+        print(f"cannot read {path}: {e}", file=sys.stderr)
+        return 1
+    probe.close()
     # Lazy import: usage and argument errors must not require the
     # dependency to be installed.
     try:
@@ -28,7 +37,6 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    path = sys.argv[1]
     morph = pymorphy3.MorphAnalyzer()
     out_lines = []
     changed = 0
