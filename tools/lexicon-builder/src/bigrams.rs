@@ -68,14 +68,25 @@ pub fn cmd_bigrams(args: Vec<String>) -> ExitCode {
         Ok(f) => f,
         Err(e) => return fail(&format!("cannot read {corpus}: {e}")),
     };
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::new(file);
     let mut unigrams: Vec<u64> = vec![0; words.len()];
     let mut bigrams: HashMap<u64, u64> = HashMap::new();
     let mut pruned = 0u64;
     let mut lines = 0u64;
     let mut token_ids: Vec<u32> = Vec::new();
-    for line in reader.lines() {
-        let Ok(line) = line else { break };
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        buf.clear();
+        // Read raw bytes and decode lossily: real-world corpora contain
+        // stray non-UTF-8 bytes, and they must not silently truncate the
+        // count (a corrupted slice once produced a "valid" empty LM).
+        // Genuine I/O errors are still fatal.
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => return fail(&format!("cannot read {corpus}: {e}")),
+        }
+        let line = String::from_utf8_lossy(&buf);
         lines += 1;
         token_ids.clear();
         for token in tokenize(&line) {
@@ -109,6 +120,11 @@ pub fn cmd_bigrams(args: Vec<String>) -> ExitCode {
         .collect();
     ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     ranked.truncate(top);
+    if ranked.is_empty() {
+        return fail(&format!(
+            "no bigrams counted over {lines} lines — wrong corpus or lexicon?"
+        ));
+    }
 
     let mut out = String::from(
         "#abbrev-lm v1 — built by `lexicon-builder bigrams` (OpenSubtitles ru slice)\n",
