@@ -9,14 +9,24 @@ only — never runs on device.
     python3 lemmatize.py data/lexicons/ru-50k.tsv
 """
 
+import os
 import sys
-
-import pymorphy3
+import tempfile
 
 
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: lemmatize.py <lexicon.tsv>", file=sys.stderr)
+        return 1
+    # Lazy import: usage and argument errors must not require the
+    # dependency to be installed.
+    try:
+        import pymorphy3
+    except ModuleNotFoundError:
+        print(
+            "pymorphy3 is not installed; run: pip install pymorphy3 pymorphy3-dicts-ru",
+            file=sys.stderr,
+        )
         return 1
     path = sys.argv[1]
     morph = pymorphy3.MorphAnalyzer()
@@ -33,8 +43,15 @@ def main() -> int:
             if new_lemma != lemma:
                 changed += 1
             out_lines.append(f"{form}\t{new_lemma}\t{freq}")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(out_lines) + "\n")
+    # Atomic replace: a crash mid-write must not corrupt the artifact.
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(out_lines) + "\n")
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
     print(f"lemmatized {path}: {changed} lemmas updated", file=sys.stderr)
     return 0
 
