@@ -163,8 +163,15 @@ function logAcceptance(event) {
   localStorage.setItem(LOG_KEY, prev + line + "\n");
 }
 
-function download(name, text, type) {
-  const blob = new Blob([text], { type });
+function download(name, text, type, { bom = false } = {}) {
+  // Declare UTF-8 explicitly, and for human-inspected files prepend a BOM
+  // so editors/Excel don't misdetect Cyrillic as a legacy codepage (the
+  // ASCII-heavy JSONL log is otherwise guessed as cp1251 → mojibake). The
+  // history TSV gets no BOM: it is re-imported by the engine and a leading
+  // BOM would corrupt the first field.
+  const blob = new Blob([(bom ? "\uFEFF" : "") + text], {
+    type: `${type};charset=utf-8`,
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -179,10 +186,19 @@ els.editor.addEventListener("keyup", (e) => {
   if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) render();
 });
 els.exportHistory.addEventListener("click", () =>
-  download("abbrev-history.tsv", localStorage.getItem(HISTORY_KEY) || "", "text/tab-separated-values"),
+  download(
+    "abbrev-history.tsv",
+    localStorage.getItem(HISTORY_KEY) || "",
+    "text/tab-separated-values",
+  ),
 );
 els.exportLog.addEventListener("click", () =>
-  download("abbrev-acceptlog.jsonl", localStorage.getItem(LOG_KEY) || "", "application/x-ndjson"),
+  download(
+    "abbrev-acceptlog.jsonl",
+    localStorage.getItem(LOG_KEY) || "",
+    "application/x-ndjson",
+    { bom: true },
+  ),
 );
 els.clear.addEventListener("click", () => {
   if (!confirm("Удалить локальную историю и лог принятий?")) return;
