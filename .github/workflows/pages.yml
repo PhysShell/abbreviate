@@ -2,7 +2,7 @@ name: Deploy web demo to Pages
 
 on:
   push:
-    branches: [main]
+    branches: [claude/russian-ime-architecture-qmdroh]
     paths:
       - "crates/abbrev-wasm/**"
       - "crates/abbrev-core/**"
