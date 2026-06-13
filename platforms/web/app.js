@@ -25,7 +25,10 @@ const els = {
 };
 
 let engine = null;
-let pendingUndo = null; // last choice that can still be reverted with one tap
+// Last choice that can still be reverted with one tap. It is deliberately
+// not written to history until the user types on/leaves the page: a tap is
+// only confirmed once it is kept.
+let pendingUndo = null;
 
 async function fetchText(url) {
   const res = await fetch(url);
@@ -147,9 +150,26 @@ function closePopup() {
   document.getElementById("forms-popup")?.remove();
 }
 
-// Insert the chosen form (treated as confirmed), teach the engine, and
-// arm a one-tap undo so the choice can still be reverted.
+// A pending choice becomes confirmed only when it survives past the immediate
+// undo window. This keeps the core signal semantics honest: undoing a just-made
+// choice records `reverted`, not `confirmed + reverted`.
+function confirmPendingUndo() {
+  if (!pendingUndo) return;
+  const { shorthand, form, context, rank, fromHold } = pendingUndo;
+  if (els.learn.checked && engine) {
+    engine.accept(shorthand, form);
+    localStorage.setItem(HISTORY_KEY, engine.export_history());
+  }
+  if (els.log.checked) {
+    logEvent({ status: "confirmed", shorthand, form, context, rank, fromHold });
+  }
+  pendingUndo = null;
+}
+
+// Insert the chosen form and arm a one-tap undo; learning/logging are deferred
+// until the choice is actually kept.
 function choose(form, shorthand, context, rank, fromHold) {
+  confirmPendingUndo();
   closePopup();
   const { start, end } = caretWord();
   const text = els.editor.value;
@@ -158,14 +178,15 @@ function choose(form, shorthand, context, rank, fromHold) {
   els.editor.setSelectionRange(caret, caret);
   els.editor.focus();
 
-  if (els.learn.checked && engine) {
-    engine.accept(shorthand, form); // confirmed (positive signal)
-    localStorage.setItem(HISTORY_KEY, engine.export_history());
-  }
-  if (els.log.checked) {
-    logEvent({ status: "confirmed", shorthand, form, context, rank, fromHold });
-  }
-  pendingUndo = { shorthand, form, start, span: form.length + 1 };
+  pendingUndo = {
+    shorthand,
+    form,
+    context,
+    rank,
+    fromHold,
+    start,
+    span: form.length + 1,
+  };
   render();
 }
 
@@ -224,7 +245,7 @@ function download(name, text, type, { bom = false } = {}) {
 }
 
 els.editor.addEventListener("input", () => {
-  pendingUndo = null; // typing past the insertion invalidates the undo
+  confirmPendingUndo(); // typing past the insertion confirms the choice
   render();
 });
 els.editor.addEventListener("click", render);
@@ -246,8 +267,11 @@ els.exportLog.addEventListener("click", () =>
     { bom: true },
   ),
 );
+window.addEventListener("beforeunload", confirmPendingUndo);
+
 els.clear.addEventListener("click", () => {
   if (!confirm("Удалить локальную историю и лог принятий?")) return;
+  pendingUndo = null;
   localStorage.removeItem(HISTORY_KEY);
   localStorage.removeItem(LOG_KEY);
   if (engine) engine.import_history("");
