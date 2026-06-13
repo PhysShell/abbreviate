@@ -343,10 +343,18 @@ impl Engine {
             .collect()
     }
 
-    /// Records an accepted suggestion; future rankings adapt to the user.
+    /// Records a **confirmed** suggestion (picked and kept); future
+    /// rankings adapt toward this pair.
     pub fn accept(&mut self, input: &str, form: &str) {
         let input_skeleton = skeleton(&normalize(input.trim()));
-        self.history.accept(&input_skeleton, &normalize(form));
+        self.history.confirm(&input_skeleton, &normalize(form));
+    }
+
+    /// Records a **reverted** suggestion (undone/edited after insertion);
+    /// future rankings adapt away from this pair (the prior can go negative).
+    pub fn reject(&mut self, input: &str, form: &str) {
+        let input_skeleton = skeleton(&normalize(input.trim()));
+        self.history.reject(&input_skeleton, &normalize(form));
     }
 
     /// History blob for the shell to persist (privacy stays shell-side).
@@ -356,6 +364,12 @@ impl Engine {
 
     pub fn import_history(&mut self, tsv: &str) {
         self.history = UserHistory::from_tsv(tsv);
+    }
+
+    /// Merges another device's history blob into this one (sum of counters)
+    /// — the engine-side hook for cross-device sync.
+    pub fn merge_history(&mut self, tsv: &str) {
+        self.history.merge(&UserHistory::from_tsv(tsv));
     }
 
     /// Candidate generation: union of skeleton, completion, suffix and

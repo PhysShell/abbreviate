@@ -161,12 +161,29 @@ impl AbbrevEngine {
         Ok(())
     }
 
-    /// Records the suggestion the user accepted (local personalization).
+    /// Records a confirmed suggestion (picked and kept).
     pub fn accept(&self, input: String, form: String) {
         self.inner
             .lock()
             .expect("engine mutex poisoned")
             .accept(&input, &form);
+    }
+
+    /// Records a reverted suggestion (undone/edited after insertion) —
+    /// negative signal; the pair's ranking prior can go negative.
+    pub fn reject(&self, input: String, form: String) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .reject(&input, &form);
+    }
+
+    /// Merges another device's history blob (sum of counters) for sync.
+    pub fn merge_history(&self, blob: String) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .merge_history(&blob);
     }
 
     /// Opaque history blob; the shell decides where (and whether) to store it.

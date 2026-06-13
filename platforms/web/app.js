@@ -25,6 +25,7 @@ const els = {
 };
 
 let engine = null;
+let pendingUndo = null; // last choice that can still be reverted with one tap
 
 async function fetchText(url) {
   const res = await fetch(url);
@@ -79,6 +80,13 @@ function render() {
   els.strip.innerHTML = "";
   if (!engine) return;
   const { word, context } = caretWord();
+  // Right after a choice the word is empty (caret sits past the inserted
+  // space): offer a one-tap undo. Tapping it is the reverted signal —
+  // confirmed != tapped, the whole point of the lifecycle.
+  if (word.length === 0 && pendingUndo) {
+    els.strip.appendChild(undoChip());
+    return;
+  }
   if (word.length < MIN_LEN) return;
   const ctx = els.context.checked ? context : "";
   let groups;
@@ -139,7 +147,8 @@ function closePopup() {
   document.getElementById("forms-popup")?.remove();
 }
 
-// Insert the chosen form, teach the engine, and log the acceptance locally.
+// Insert the chosen form (treated as confirmed), teach the engine, and
+// arm a one-tap undo so the choice can still be reverted.
 function choose(form, shorthand, context, rank, fromHold) {
   closePopup();
   const { start, end } = caretWord();
@@ -150,18 +159,48 @@ function choose(form, shorthand, context, rank, fromHold) {
   els.editor.focus();
 
   if (els.learn.checked && engine) {
-    engine.accept(shorthand, form);
+    engine.accept(shorthand, form); // confirmed (positive signal)
     localStorage.setItem(HISTORY_KEY, engine.export_history());
   }
-  // The acceptance log is a separate, explicit opt-in (off by default);
-  // disabling learning must never leave logging silently running.
   if (els.log.checked) {
-    logAcceptance({ shorthand, form, context, rank, fromHold });
+    logEvent({ status: "confirmed", shorthand, form, context, rank, fromHold });
   }
+  pendingUndo = { shorthand, form, start, span: form.length + 1 };
   render();
 }
 
-function logAcceptance(event) {
+function undoChip() {
+  const b = document.createElement("button");
+  b.className = "chip-main undo";
+  b.textContent = `↶ отменить «${pendingUndo.shorthand}»`;
+  b.title = "вернуть сокращение — это негативный сигнал (reverted)";
+  b.addEventListener("click", revertLast);
+  return b;
+}
+
+// Reverting a just-made choice: restore the shorthand and tell the engine
+// this pair was rejected (negative signal — its prior can go negative).
+function revertLast() {
+  if (!pendingUndo) return;
+  const { shorthand, form, start, span } = pendingUndo;
+  const text = els.editor.value;
+  els.editor.value = text.slice(0, start) + shorthand + text.slice(start + span);
+  const caret = start + shorthand.length;
+  els.editor.setSelectionRange(caret, caret);
+  els.editor.focus();
+
+  if (els.learn.checked && engine) {
+    engine.reject(shorthand, form); // reverted (negative signal)
+    localStorage.setItem(HISTORY_KEY, engine.export_history());
+  }
+  if (els.log.checked) {
+    logEvent({ status: "reverted", shorthand, form });
+  }
+  pendingUndo = null;
+  render();
+}
+
+function logEvent(event) {
   const line = JSON.stringify({ ts: Date.now(), ...event });
   const prev = localStorage.getItem(LOG_KEY) || "";
   localStorage.setItem(LOG_KEY, prev + line + "\n");
@@ -184,7 +223,10 @@ function download(name, text, type, { bom = false } = {}) {
   URL.revokeObjectURL(url);
 }
 
-els.editor.addEventListener("input", render);
+els.editor.addEventListener("input", () => {
+  pendingUndo = null; // typing past the insertion invalidates the undo
+  render();
+});
 els.editor.addEventListener("click", render);
 els.editor.addEventListener("keyup", (e) => {
   if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) render();
