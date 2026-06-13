@@ -1,0 +1,114 @@
+# Транслит-алиасы технических терминов: key<TAB>form<TAB>lemma.
+# Тот же формат, что data/shortcuts/ru.tsv — грузится тем же слоем
+# (Engine::set_shortcuts / --shortcuts). Точное совпадение ключа, без
+# автозамены: при вводе "гитхаб" в ленте появляется кандидат "GitHub".
+# kind=foreign_term для будущего UI хранится неявно (отдельный файл).
+#
+# Сгенерировано офлайн как «LLM-учитель». Расширять своей моделью промптом:
+#   «Дай TSV `ключ<TAB>форма<TAB>форма` для N популярных IT-терминов: ключ —
+#    как русскоязычный разработчик пишет термин кириллицей (вкл. падежные формы:
+#    гитхаб/гитхабе/гитхаба), форма — каноническое английское написание.
+#    Только однословные ключи. Избегай ключей, совпадающих с обычными русскими
+#    словами. По одной строке на ключ.»
+# После генерации: дедуп, прогнать через `abbrev suggest <ключ> --shortcuts`,
+# глазами проверить спорное.
+
+# — платформы и хостинг —
+гитхаб	GitHub	GitHub
+гитхабе	GitHub	GitHub
+гитхаба	GitHub	GitHub
+гитхабом	GitHub	GitHub
+гитлаб	GitLab	GitLab
+гитлабе	GitLab	GitLab
+гит	Git	Git
+джира	Jira	Jira
+джире	Jira	Jira
+джиру	Jira	Jira
+битбакет	Bitbucket	Bitbucket
+докерхаб	Docker Hub	Docker Hub
+
+# — языки —
+питон	Python	Python
+питоне	Python	Python
+питона	Python	Python
+пайтон	Python	Python
+джаваскрипт	JavaScript	JavaScript
+тайпскрипт	TypeScript	TypeScript
+котлин	Kotlin	Kotlin
+котлине	Kotlin	Kotlin
+свифт	Swift	Swift
+голанг	Go	Go
+руби	Ruby	Ruby
+раст	Rust	Rust
+скала	Scala	Scala
+хаскель	Haskell	Haskell
+эликсир	Elixir	Elixir
+
+# — фреймворки и библиотеки —
+реакт	React	React
+реакте	React	React
+ангуляр	Angular	Angular
+вью	Vue	Vue
+некст	Next.js	Next.js
+ноде	Node.js	Node.js
+джанго	Django	Django
+фласк	Flask	Flask
+спринг	Spring	Spring
+торч	PyTorch	PyTorch
+тензорфлоу	TensorFlow	TensorFlow
+
+# — инфраструктура и БД —
+докер	Docker	Docker
+докере	Docker	Docker
+докера	Docker	Docker
+кубер	Kubernetes	Kubernetes
+кубернетес	Kubernetes	Kubernetes
+постгрес	PostgreSQL	PostgreSQL
+постгресе	PostgreSQL	PostgreSQL
+редис	Redis	Redis
+монго	MongoDB	MongoDB
+кафка	Kafka	Kafka
+нгинкс	nginx	nginx
+терраформ	Terraform	Terraform
+ансибл	Ansible	Ansible
+
+# — ОС —
+линукс	Linux	Linux
+линуксе	Linux	Linux
+убунту	Ubuntu	Ubuntu
+дебиан	Debian	Debian
+винда	Windows	Windows
+виндовс	Windows	Windows
+макос	macOS	macOS
+андроид	Android	Android
+
+# — сервисы и приложения —
+телеграм	Telegram	Telegram
+телеграме	Telegram	Telegram
+телега	Telegram	Telegram
+телеге	Telegram	Telegram
+ютуб	YouTube	YouTube
+ютубе	YouTube	YouTube
+гугл	Google	Google
+гугле	Google	Google
+слак	Slack	Slack
+дискорд	Discord	Discord
+ноушн	Notion	Notion
+фигма	Figma	Figma
+фигме	Figma	Figma
+джетбрейнс	JetBrains	JetBrains
+пайчарм	PyCharm	PyCharm
+чатгпт	ChatGPT	ChatGPT
+опенай	OpenAI	OpenAI
+
+# — форматы и понятия —
+джейсон	JSON	JSON
+реджекс	regex	regex
+апи	API	API
+бэкенд	backend	backend
+фронтенд	frontend	frontend
+девопс	DevOps	DevOps
+коммит	commit	commit
+пуллреквест	pull request	pull request
+мердж	merge	merge
+деплой	deploy	deploy

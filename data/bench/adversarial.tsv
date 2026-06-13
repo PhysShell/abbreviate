@@ -1,0 +1,42 @@
+# Hard-negatives: input<TAB>expected<TAB>tag. Hand-authored (LLM-teacher),
+# NOT from the generator — cases the synthetic generator never makes:
+#  • real aggressive abbreviations people actually type (often 2-4 chars);
+#  • "keep" cases: a real word that must stay itself (expected == input).
+# This is a STRESS set, not a regression gate — low scores are findings.
+# Run: abbrev bench data/bench/adversarial.tsv --lexicon data/lexicons/ru-50k.tsv --lm data/lm/ru-lm.tsv
+
+# real aggressive abbreviations, fuzzy-reachable (>=3 chars)
+чтб	чтобы	aggr
+тлк	только	aggr
+кгд	когда	aggr
+скзл	сказал	aggr
+дмаю	думаю	aggr
+прст	просто	aggr
+кнчн	конечно	aggr
+слшй	слушай	aggr
+гврю	говорю	aggr
+двй	давай	aggr
+спсбо	спасибо	aggr
+пнятн	понятно	aggr
+счс	сейчас	aggr
+блгдрю	благодарю	aggr
+нрм	нормально	aggr
+
+# ultra-short (2 chars) — below the fuzzy threshold; need short-word/shortcut
+# layer (roadmap). Expected to MISS here; documents the gap.
+зн	знаю	ultrashort
+гд	где	ultrashort
+ег	его	ultrashort
+тя	тебя	ultrashort
+
+# "keep": a real frequent word must remain itself (expected == input)
+она	она	keep
+они	они	keep
+мама	мама	keep
+рука	рука	keep
+ночь	ночь	keep
+день	день	keep
+дом	дом	keep
+мир	мир	keep
+кот	кот	keep
+рот	рот	keep

@@ -26,6 +26,9 @@ cargo run -p abbrev-cli -- bench data/bench/basic.tsv
 cargo run -p abbrev-cli -- bench data/bench/slang.tsv \
     --lexicon data/lexicons/ru-50k.tsv --shortcuts data/shortcuts/ru.tsv
 
+# транслит-термины (тот же слой): гитхаб→GitHub, докер→Docker, телега→Telegram
+cargo run -p abbrev-cli -- suggest гитхаб --shortcuts data/translit/ru-tech.tsv
+
 # честный бенчмарк: 20k сгенерированных сокращений на лексиконе 48k форм
 cargo run --release -p abbrev-cli -- gen --lexicon data/lexicons/ru-50k.tsv \
     --count 20000 --seed 42 -o /tmp/gen.tsv
