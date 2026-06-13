@@ -121,11 +121,30 @@ impl BigramModel {
 
 impl ContextModel for BigramModel {
     fn score(&self, context: &Context, candidate_form: &str, _lemma: &str) -> f32 {
-        let Some(prev) = context.previous_words.last() else {
+        // Use the most recent context token that carries a word, stripping
+        // surrounding punctuation: `ну,` / `(привет)` must still match LM
+        // entries, otherwise contextual reranking silently falls back to no
+        // context on ordinary punctuated text.
+        let Some(prev) = context
+            .previous_words
+            .iter()
+            .rev()
+            .map(|w| context_key(w))
+            .find(|k| !k.is_empty())
+        else {
             return 0.0;
         };
-        self.pmi(&normalize(prev.trim()), &normalize(candidate_form))
+        self.pmi(&prev, &normalize(candidate_form))
     }
+}
+
+/// Russian-word key of a raw context token: normalize (lowercase, `ё→е`)
+/// and trim surrounding non-letters. Internal hyphens are kept (`кто-то`),
+/// matching the bigram builder's tokenizer.
+fn context_key(word: &str) -> String {
+    normalize(word)
+        .trim_matches(|c: char| !matches!(c, 'а'..='я'))
+        .to_string()
 }
 
 #[cfg(test)]
@@ -160,6 +179,18 @@ mod tests {
         let with_noise = lm.score(&ctx(&["зайди", "в"]), "приват", "приват");
         let direct = lm.score(&ctx(&["в"]), "приват", "приват");
         assert_eq!(with_noise, direct);
+    }
+
+    #[test]
+    fn context_punctuation_does_not_drop_the_signal() {
+        let lm = BigramModel::from_tsv_str(LM).unwrap();
+        let clean = lm.score(&ctx(&["ну"]), "привет", "привет");
+        assert!(clean > 0.0);
+        // Attached punctuation must not silently disable the LM.
+        assert_eq!(lm.score(&ctx(&["ну,"]), "привет", "привет"), clean);
+        assert_eq!(lm.score(&ctx(&["(ну)"]), "привет", "привет"), clean);
+        // A standalone punctuation token falls back to the prior word.
+        assert_eq!(lm.score(&ctx(&["ну", "—"]), "привет", "привет"), clean);
     }
 
     #[test]

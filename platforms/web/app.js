@@ -63,7 +63,9 @@ function caretWord() {
   let start = caret;
   while (start > 0 && isWordChar(text[start - 1])) start--;
   const word = text.slice(start, caret);
-  const before = text.slice(0, start).trim().split(/\s+/).filter(Boolean);
+  // Extract clean Russian-word tokens for context (drop punctuation), so
+  // "с другой, стрны" still feeds "другой" to the LM, not "другой,".
+  const before = text.slice(0, start).match(/[а-яёА-ЯЁ-]+/g) || [];
   const context = before.slice(-2).join(" ");
   return { word, start, end: caret, context };
 }
