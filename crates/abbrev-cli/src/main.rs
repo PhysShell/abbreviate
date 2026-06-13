@@ -188,12 +188,39 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Benchmark over `input<TAB>expected[<TAB>tag[<TAB>context]]` lines:
-/// top-1 accuracy, top-3 recall, latency — overall and per
-/// corruption-rule tag. The optional 4th column is left context
-/// (space-separated previous words) fed to the engine per case.
+/// Aggregate benchmark counters. Floats are summed and divided by `total`
+/// at report time so every metric is comparable across runs (A/B for tune,
+/// LM, etc.). This is the dashboard the project optimizes against.
+#[derive(Default)]
+struct Metrics {
+    total: u32,
+    top1: u32,
+    top3: u32,
+    /// Σ reciprocal rank of the expected form within the flat top-K.
+    rr_sum: f64,
+    /// Σ keystroke savings counted only on top-1 hits (misses save 0,
+    /// because a miss means the user types the full word).
+    ks_realized: f64,
+    /// Σ keystroke savings over top-3 hits (oracle: best the strip can do).
+    ks_oracle: f64,
+    /// Σ score(top1) − score(top2); calibrates the autocorrect margin.
+    margin_sum: f64,
+    margin_n: u32,
+    /// Grouped-strip metrics over the top-3 lemma groups.
+    lemma_hit: u32,
+    best_form_hit: u32,
+    hold_success: u32,
+}
+
+/// Benchmark over `input<TAB>expected[<TAB>tag[<TAB>context]]` lines.
+/// Reports accuracy (top-1, top-3), ranking quality (MRR), keystroke
+/// savings, autocorrect margin, latency, and grouped-strip quality
+/// (lemma/best-form/hold hit@3) — overall and per corruption-rule tag.
+/// The optional 4th column is per-case left context.
 /// `--errors path` dumps the failing cases for analysis.
 fn cmd_bench(args: Vec<&str>) -> ExitCode {
+    const FLAT_K: usize = 10;
+    const GROUPS: usize = 3;
     let mut errors_path: Option<String> = None;
     let mut rest: Vec<&str> = Vec::new();
     let mut it = args.into_iter();
@@ -216,8 +243,8 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
     let engine = build_engine(opts.lexicon, opts.lm);
-    let (mut total, mut top1, mut top3) = (0u32, 0u32, 0u32);
-    let mut by_tag: BTreeMap<String, (u32, u32, u32)> = BTreeMap::new();
+    let mut m = Metrics::default();
+    let mut by_tag: BTreeMap<String, Metrics> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
     let mut errors = String::new();
     for line in cases.lines() {
@@ -234,44 +261,94 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
             .next()
             .map(|words| Context::new(words.split_whitespace().map(String::from).collect()));
         let context = case_context.as_ref().unwrap_or(&opts.context);
+
         let started = Instant::now();
-        let suggestions = engine.suggest(input, context, 3);
+        let flat = engine.suggest(input, context, FLAT_K);
+        let groups = engine.suggest_grouped(input, context, GROUPS);
         latencies_us.push(started.elapsed().as_micros());
-        total += 1;
-        let hit1 = suggestions.first().is_some_and(|s| s.form == expected);
-        let hit3 = suggestions.iter().any(|s| s.form == expected);
-        let entry = by_tag.entry(tag.to_string()).or_insert((0, 0, 0));
-        entry.0 += 1;
-        if hit1 {
-            top1 += 1;
-            entry.1 += 1;
+
+        let savings = keystroke_savings(input, expected);
+        let rank = flat.iter().position(|s| s.form == expected);
+        let hit1 = rank == Some(0);
+        let hit3 = rank.is_some_and(|r| r < GROUPS);
+        // Grouped strip: did the right lemma surface, and was the form the
+        // group's best or only reachable by holding?
+        let best_form_hit = groups.iter().any(|g| g.best.form == expected);
+        let lemma_hit = groups
+            .iter()
+            .any(|g| g.best.form == expected || g.variants.iter().any(|v| v == expected));
+
+        let tag_m = by_tag.entry(tag.to_string()).or_default();
+        for slot in [&mut m, tag_m] {
+            slot.total += 1;
+            if hit1 {
+                slot.top1 += 1;
+                slot.ks_realized += savings;
+            }
+            if hit3 {
+                slot.top3 += 1;
+                slot.ks_oracle += savings;
+            }
+            if let Some(r) = rank {
+                slot.rr_sum += 1.0 / (r as f64 + 1.0);
+            }
+            if flat.len() >= 2 {
+                slot.margin_sum += f64::from(flat[0].score - flat[1].score);
+                slot.margin_n += 1;
+            }
+            if best_form_hit {
+                slot.best_form_hit += 1;
+            }
+            if lemma_hit {
+                slot.lemma_hit += 1;
+                if !best_form_hit {
+                    slot.hold_success += 1;
+                }
+            }
         }
-        if hit3 {
-            top3 += 1;
-            entry.2 += 1;
-        } else if errors_path.is_some() {
-            let got: Vec<&str> = suggestions.iter().map(|s| s.form.as_str()).collect();
+        if !hit3 && errors_path.is_some() {
+            let got: Vec<&str> = flat.iter().take(3).map(|s| s.form.as_str()).collect();
             errors.push_str(&format!("{input}\t{expected}\t{tag}\t{}\n", got.join("|")));
         }
     }
-    if total == 0 {
+    if m.total == 0 {
         return fail("no cases found");
     }
     latencies_us.sort_unstable();
     let mean = latencies_us.iter().sum::<u128>() / latencies_us.len() as u128;
     let p95 = latencies_us[(latencies_us.len() * 95 / 100).min(latencies_us.len() - 1)];
-    let pct = |hits: u32, n: u32| 100.0 * f64::from(hits) / f64::from(n.max(1));
-    println!("cases:      {total}");
-    println!("top-1:      {:.1}%", pct(top1, total));
-    println!("top-3:      {:.1}%", pct(top3, total));
-    println!("latency:    mean {mean} µs, p95 {p95} µs");
+
+    let pct = |x: u32, n: u32| 100.0 * f64::from(x) / f64::from(n.max(1));
+    println!("cases:        {}", m.total);
+    println!("top-1:        {:.1}%", pct(m.top1, m.total));
+    println!("top-3:        {:.1}%", pct(m.top3, m.total));
+    println!("MRR:          {:.3}", m.rr_sum / f64::from(m.total));
+    println!(
+        "keystrokes:   realized {:.1}%  oracle@3 {:.1}%",
+        100.0 * m.ks_realized / f64::from(m.total),
+        100.0 * m.ks_oracle / f64::from(m.total),
+    );
+    println!(
+        "group@3:      lemma {:.1}%  best-form {:.1}%  hold-rescue {:.1}%",
+        pct(m.lemma_hit, m.total),
+        pct(m.best_form_hit, m.total),
+        pct(m.hold_success, m.total),
+    );
+    println!(
+        "margin t1-t2: {:.2}",
+        m.margin_sum / f64::from(m.margin_n.max(1)),
+    );
+    println!("latency:      mean {mean} µs, p95 {p95} µs");
     if by_tag.len() > 1 {
         println!("per tag:");
-        for (tag, (n, t1, t3)) in &by_tag {
+        for (tag, t) in &by_tag {
             println!(
-                "  {tag:<10} n={n:<6} top-1 {:.1}%  top-3 {:.1}%",
-                pct(*t1, *n),
-                pct(*t3, *n)
+                "  {tag:<10} n={:<6} top-1 {:.1}%  top-3 {:.1}%  MRR {:.3}  ks {:.1}%",
+                t.total,
+                pct(t.top1, t.total),
+                pct(t.top3, t.total),
+                t.rr_sum / f64::from(t.total.max(1)),
+                100.0 * t.ks_realized / f64::from(t.total.max(1)),
             );
         }
     }
@@ -282,6 +359,17 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         eprintln!("top-3 misses dumped to {path}");
     }
     ExitCode::SUCCESS
+}
+
+/// Fraction of keystrokes saved by accepting `expected` after typing
+/// `input`, in chars, clamped to [0, 1].
+fn keystroke_savings(input: &str, expected: &str) -> f64 {
+    let typed = input.chars().count() as f64;
+    let full = expected.chars().count() as f64;
+    if full <= 0.0 {
+        return 0.0;
+    }
+    (1.0 - typed / full).clamp(0.0, 1.0)
 }
 
 fn fail(message: &str) -> ExitCode {
