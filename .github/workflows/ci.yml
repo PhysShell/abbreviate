@@ -31,6 +31,14 @@ jobs:
           ./target/release/abbrev gen --lexicon data/lexicons/ru-50k.tsv \
             --count 5000 --seed 42 -o /tmp/gen.tsv
           ./target/release/abbrev bench /tmp/gen.tsv --lexicon data/lexicons/ru-50k.tsv
+      - name: Context benchmark (bigram LM lift, informational)
+        run: |
+          ./target/release/abbrev gen --lexicon data/lexicons/ru-50k.tsv \
+            --context-from data/lm/ru-lm.tsv --count 5000 --seed 42 -o /tmp/gen-ctx.tsv
+          echo "--- without LM:" && ./target/release/abbrev bench /tmp/gen-ctx.tsv \
+            --lexicon data/lexicons/ru-50k.tsv | head -3
+          echo "--- with LM:" && ./target/release/abbrev bench /tmp/gen-ctx.tsv \
+            --lexicon data/lexicons/ru-50k.tsv --lm data/lm/ru-lm.tsv | head -3
 
   wasm:
     runs-on: ubuntu-latest

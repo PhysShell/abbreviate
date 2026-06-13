@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use abbrev_core::{Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon};
 
 uniffi::setup_scaffolding!();
 
@@ -32,12 +32,16 @@ pub struct SuggestionGroup {
 #[derive(Debug, uniffi::Error)]
 pub enum AbbrevError {
     InvalidLexicon { message: String },
+    InvalidLanguageModel { message: String },
 }
 
 impl fmt::Display for AbbrevError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidLexicon { message } => write!(f, "invalid lexicon: {message}"),
+            Self::InvalidLanguageModel { message } => {
+                write!(f, "invalid language model: {message}")
+            }
         }
     }
 }
@@ -126,6 +130,20 @@ impl AbbrevEngine {
             .lock()
             .expect("engine mutex poisoned")
             .forms_of_lemma(&lemma)
+    }
+
+    /// Plugs in a bigram language model (`#abbrev-lm v1` TSV artifact);
+    /// `previous_words` passed to `suggest` then rerank candidates.
+    pub fn load_language_model(&self, tsv: String) -> Result<(), AbbrevError> {
+        let model =
+            BigramModel::from_tsv_str(&tsv).map_err(|e| AbbrevError::InvalidLanguageModel {
+                message: e.to_string(),
+            })?;
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_context_model(Box::new(model));
+        Ok(())
     }
 
     /// Records the suggestion the user accepted (local personalization).

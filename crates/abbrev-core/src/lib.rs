@@ -30,10 +30,12 @@ pub mod engine;
 pub mod history;
 pub mod index;
 pub mod lexicon;
+pub mod ngram;
 pub mod rank;
 
 pub use context::{Context, ContextModel, NoContext};
 pub use edit::EditCosts;
 pub use engine::{Engine, EngineConfig, Suggestion, SuggestionGroup};
 pub use lexicon::{Lexicon, LexiconEntry, LexiconError};
+pub use ngram::{BigramModel, LmError};
 pub use rank::Weights;

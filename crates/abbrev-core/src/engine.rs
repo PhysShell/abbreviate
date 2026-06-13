@@ -11,7 +11,7 @@ use crate::alphabet::{normalize, skeleton};
 use crate::context::{Context, ContextModel, NoContext};
 use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
-use crate::index::Indexes;
+use crate::index::{Indexes, delete_variants};
 use crate::lexicon::{EntryId, Lexicon};
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
 
@@ -42,6 +42,12 @@ pub struct EngineConfig {
     /// Edit-distance cutoff: `base + per_char * input_len`.
     pub edit_cutoff_base: f32,
     pub edit_cutoff_per_char: f32,
+    /// Build and query the SymSpell-style skeleton delete index. Costs
+    /// memory (every skeleton minus one char); disable on tight devices.
+    pub typo_tolerance: bool,
+    /// Minimum input-skeleton length for typo-tolerant retrieval; short
+    /// skeletons make distance-1 matches meaningless.
+    pub fuzzy_skeleton_min_len: usize,
     pub weights: Weights,
     pub costs: EditCosts,
 }
@@ -53,6 +59,8 @@ impl Default for EngineConfig {
             per_source_cap: 2000,
             edit_cutoff_base: 1.0,
             edit_cutoff_per_char: 0.3,
+            typo_tolerance: true,
+            fuzzy_skeleton_min_len: 3,
             weights: Weights::default(),
             costs: EditCosts::default(),
         }
@@ -97,7 +105,7 @@ impl Engine {
     }
 
     pub fn with_config(lexicon: Lexicon, config: EngineConfig) -> Self {
-        let indexes = Indexes::build(&lexicon);
+        let indexes = Indexes::build(&lexicon, config.typo_tolerance);
         let mut by_lemma: HashMap<String, Vec<EntryId>> = HashMap::new();
         for (id, entry) in lexicon.iter() {
             by_lemma
@@ -134,6 +142,25 @@ impl Engine {
     /// digits, Latin letters, `_`, `@`, URLs, code — is left untouched
     /// (returns no suggestions).
     pub fn suggest(&self, input: &str, context: &Context, limit: usize) -> Vec<Suggestion> {
+        let mut scored = self.scored(input, context, limit);
+        scored.truncate(limit);
+        scored
+            .into_iter()
+            .map(|(score, id)| {
+                let entry = self.lexicon.get(id);
+                Suggestion {
+                    form: entry.form.clone(),
+                    lemma: entry.lemma.clone(),
+                    score,
+                }
+            })
+            .collect()
+    }
+
+    /// Full ranked candidate list (score, id), best first. The grouped
+    /// view needs the complete list: truncating before grouping lets one
+    /// form-rich lemma push other lemmas out of the strip.
+    fn scored(&self, input: &str, context: &Context, limit: usize) -> Vec<(f32, EntryId)> {
         let norm = normalize(input.trim());
         let input_chars: Vec<char> = norm.chars().collect();
         if input_chars.len() < self.config.min_input_len || limit == 0 || !is_protected_safe(&norm)
@@ -184,18 +211,7 @@ impl Engine {
         }
 
         scored.sort_by(|a, b| b.0.total_cmp(&a.0));
-        scored.truncate(limit);
         scored
-            .into_iter()
-            .map(|(s, id)| {
-                let entry = self.lexicon.get(id);
-                Suggestion {
-                    form: entry.form.clone(),
-                    lemma: entry.lemma.clone(),
-                    score: s,
-                }
-            })
-            .collect()
     }
 
     /// Two-level suggestions: one group per lemma, in ranking order.
@@ -206,23 +222,28 @@ impl Engine {
         context: &Context,
         limit: usize,
     ) -> Vec<SuggestionGroup> {
-        // Over-fetch so that sibling forms of one lemma don't crowd out
-        // other lemmas from the strip.
-        let flat = self.suggest(input, context, limit.saturating_mul(4));
+        // Group over the *complete* ranked list: a form-rich lemma must
+        // not push other lemmas out of the strip.
         let mut seen_lemmas: HashSet<String> = HashSet::new();
         let mut groups = Vec::new();
-        for suggestion in flat {
-            if !seen_lemmas.insert(normalize(&suggestion.lemma)) {
+        for (score, id) in self.scored(input, context, limit) {
+            let entry = self.lexicon.get(id);
+            if !seen_lemmas.insert(normalize(&entry.lemma)) {
                 continue;
             }
+            let best = Suggestion {
+                form: entry.form.clone(),
+                lemma: entry.lemma.clone(),
+                score,
+            };
             let variants = self
-                .forms_of_lemma(&suggestion.lemma)
+                .forms_of_lemma(&entry.lemma)
                 .into_iter()
-                .filter(|form| *form != suggestion.form)
+                .filter(|form| *form != best.form)
                 .collect();
             groups.push(SuggestionGroup {
-                lemma: suggestion.lemma.clone(),
-                best: suggestion,
+                lemma: best.lemma.clone(),
+                best,
                 variants,
             });
             if groups.len() == limit {
@@ -266,28 +287,18 @@ impl Engine {
         self.history = UserHistory::from_tsv(tsv);
     }
 
-    /// Candidate generation: union of skeleton, completion and suffix
-    /// buckets, deduplicated. Each source is capped so worst-case work per
-    /// keystroke stays bounded — and the cap keeps the *most frequent*
-    /// entries, not the alphabetically first ones, so a large lexicon
-    /// cannot push the right word out of the scan window.
+    /// Candidate generation: union of skeleton, completion, suffix and
+    /// typo-tolerance buckets, deduplicated. Every source is capped at
+    /// `per_source_cap` and all index lookups return entries most
+    /// frequent first, so the caps are principled (never alphabetical).
+    /// Worst-case work per keystroke is bounded by the caps plus the
+    /// `with_prefix` scan budget (see `PrefixMap::with_prefix`).
     fn collect_candidates(&self, norm: &str, input_skeleton: &str) -> Vec<EntryId> {
         let cap = self.config.per_source_cap;
-        // Scan wider than the cap, then keep the top-`cap` by frequency.
-        let scan = cap.saturating_mul(8);
         let mut seen: HashSet<EntryId> = HashSet::new();
         let mut out: Vec<EntryId> = Vec::new();
-        let mut push_source = |mut ids: Vec<EntryId>, out: &mut Vec<EntryId>| {
-            if ids.len() > cap {
-                ids.sort_unstable_by(|&a, &b| {
-                    self.lexicon
-                        .get(b)
-                        .freq
-                        .total_cmp(&self.lexicon.get(a).freq)
-                });
-                ids.truncate(cap);
-            }
-            for id in ids {
+        let mut push = |ids: &[EntryId], out: &mut Vec<EntryId>| {
+            for &id in ids.iter().take(cap) {
                 if seen.insert(id) {
                     out.push(id);
                 }
@@ -295,28 +306,30 @@ impl Engine {
         };
 
         // 1. Exact and prefix skeleton buckets: `првт` → привет, приват.
-        push_source(
-            self.indexes.by_skeleton.exact(input_skeleton).to_vec(),
+        push(
+            &self.indexes.by_skeleton.exact(input_skeleton, cap),
             &mut out,
         );
-        push_source(
-            self.indexes.by_skeleton.with_prefix(input_skeleton, scan),
+        push(
+            &self.indexes.by_skeleton.with_prefix(input_skeleton, cap),
             &mut out,
         );
         // Also try the skeleton minus its last consonant: covers inputs
         // whose final consonants diverge from the target's skeleton
-        // (`тстрн` vs `тстрвн` for тестирование).
+        // (`тстрн` vs `тстрвн` for тестирование). Gated at length 4 so the
+        // shortened prefix is never shorter than 3 chars — 2-char prefixes
+        // cover huge ranges for little recall.
         let chars: Vec<char> = input_skeleton.chars().collect();
-        if chars.len() >= 3 {
+        if chars.len() >= 4 {
             let shorter: String = chars[..chars.len() - 1].iter().collect();
-            push_source(
-                self.indexes.by_skeleton.with_prefix(&shorter, scan),
+            push(
+                &self.indexes.by_skeleton.with_prefix(&shorter, cap),
                 &mut out,
             );
         }
 
         // 2. Plain completion: the input may simply be a prefix.
-        push_source(self.indexes.by_form.with_prefix(norm, scan), &mut out);
+        push(&self.indexes.by_form.with_prefix(norm, cap), &mut out);
 
         // 3. Suffix bucket: route by the longest known ending of the input.
         if let Some(ending) = KNOWN_ENDINGS
@@ -324,7 +337,49 @@ impl Engine {
             .filter(|e| norm.ends_with(*e))
             .max_by_key(|e| e.chars().count())
         {
-            push_source(self.indexes.with_suffix(ending, scan), &mut out);
+            push(&self.indexes.with_suffix(ending, cap), &mut out);
+        }
+
+        // 4. Typo tolerance (SymSpell over skeletons, distance ≤ 1): a
+        // consonant typo breaks the skeleton, so the buckets above miss
+        // the target entirely. Meet in the middle via delete variants:
+        // substitution — both sides delete the differing char; extra char
+        // on either side — one side's delete equals the other's original.
+        if self.config.typo_tolerance && chars.len() >= self.config.fuzzy_skeleton_min_len {
+            // At least 1 for tiny *non-zero* caps: `cap / 4` would
+            // silently disable typo tolerance for per_source_cap in 1..4.
+            // cap = 0 stays 0 — it means "no candidates from sources" and
+            // the final push's take(cap) would drop everything anyway.
+            // The push also bounds this source's total contribution by cap.
+            let per_bucket = cap.div_ceil(4);
+            let mut fuzzy: Vec<EntryId> = Vec::new();
+            let take = |ids: &[EntryId], fuzzy: &mut Vec<EntryId>| {
+                fuzzy.extend_from_slice(&ids[..ids.len().min(per_bucket)]);
+            };
+            take(
+                self.indexes.skeleton_delete_bucket(input_skeleton),
+                &mut fuzzy,
+            );
+            for variant in delete_variants(input_skeleton) {
+                take(
+                    &self.indexes.by_skeleton.exact(&variant, per_bucket),
+                    &mut fuzzy,
+                );
+                take(self.indexes.skeleton_delete_bucket(&variant), &mut fuzzy);
+            }
+            // Keep the overall top-`cap` by frequency across the buckets.
+            // Sort ties by id and dedup: overlapping buckets yield the
+            // same id several times, and duplicates of one frequent word
+            // must not eat the cap slots meant for diverse candidates.
+            fuzzy.sort_unstable_by(|&a, &b| {
+                self.lexicon
+                    .get(b)
+                    .freq
+                    .total_cmp(&self.lexicon.get(a).freq)
+                    .then(a.cmp(&b))
+            });
+            fuzzy.dedup();
+            push(&fuzzy, &mut out);
         }
 
         out
@@ -393,6 +448,77 @@ mod tests {
         }
         // Hyphenated Russian words are still fair game.
         assert!(is_protected_safe("кто-то"));
+    }
+
+    #[test]
+    fn consonant_typo_is_still_retrieved() {
+        // п→р (adjacent keys) inside the skeleton of компьютер: `кмртер`
+        // has skeleton кмртр, while компьютер has кмптр — no exact, prefix
+        // or suffix bucket can retrieve it. Only the delete index does
+        // (shared variant кмтр). This is retrieval, not ranking.
+        let top = top_forms(&engine(), "кмртер", 3);
+        assert!(top.iter().any(|f| f == "компьютер"), "got {top:?}");
+        // With typo tolerance off the word is unreachable.
+        let config = EngineConfig {
+            typo_tolerance: false,
+            ..EngineConfig::default()
+        };
+        let strict = Engine::with_config(Lexicon::demo(), config);
+        let top = top_forms(&strict, "кмртер", 3);
+        assert!(!top.iter().any(|f| f == "компьютер"), "got {top:?}");
+    }
+
+    #[test]
+    fn context_model_flips_ambiguous_expansion() {
+        // The dialogue acceptance case: `ну првт` means привет, while
+        // `в првт (канал)` means приват — a bigram model must override
+        // the raw frequency prior (привет is 15x more frequent).
+        use crate::ngram::BigramModel;
+        let lm = "#abbrev-lm v1\nu\tв\t1000\nu\tну\t1000\nu\tпривет\t200\n\
+                  u\tприват\t20\nb\tв\tприват\t200\nb\tну\tпривет\t150\n";
+        let mut e = engine();
+        e.set_context_model(Box::new(BigramModel::from_tsv_str(lm).unwrap()));
+        let with_ctx = |ctx_word: &str| {
+            e.suggest("првт", &Context::new(vec![ctx_word.to_string()]), 1)
+                .first()
+                .map(|s| s.form.clone())
+        };
+        assert_eq!(with_ctx("ну").as_deref(), Some("привет"));
+        assert_eq!(with_ctx("в").as_deref(), Some("приват"));
+        // No context: frequency wins as before.
+        assert_eq!(e.suggest("првт", &Context::default(), 1)[0].form, "привет");
+    }
+
+    #[test]
+    fn tiny_cap_keeps_typo_tolerance_alive() {
+        // per_source_cap < 4 must not zero out the per-bucket take and
+        // silently disable fuzzy retrieval (review finding).
+        let config = EngineConfig {
+            per_source_cap: 2,
+            ..EngineConfig::default()
+        };
+        let engine = Engine::with_config(Lexicon::demo(), config);
+        let top: Vec<String> = engine
+            .suggest("кмртер", &Context::default(), 3)
+            .into_iter()
+            .map(|s| s.form)
+            .collect();
+        assert!(top.iter().any(|f| f == "компьютер"), "got {top:?}");
+    }
+
+    #[test]
+    fn form_rich_lemma_does_not_crowd_out_other_groups() {
+        // One lemma with many high-ranked forms must still leave room for
+        // the second lemma in the grouped strip (review finding).
+        let mut tsv = String::new();
+        for ending in ["а", "е", "у", "ы", "ой", "ам", "ах", "ами", "ою"] {
+            tsv.push_str(&format!("тест{ending}\tтест\t100\n"));
+        }
+        tsv.push_str("тесто\tтесто\t90\n");
+        let engine = Engine::new(Lexicon::from_tsv_str(&tsv).unwrap());
+        let groups = engine.suggest_grouped("теста", &Context::default(), 2);
+        let lemmas: Vec<&str> = groups.iter().map(|g| g.lemma.as_str()).collect();
+        assert_eq!(lemmas, vec!["тест", "тесто"], "got {lemmas:?}");
     }
 
     #[test]

@@ -1,27 +1,52 @@
-# Web-оболочка
+# Web-демо
 
-Самый дешёвый способ показать движок и собирать фидбек: статическая страница
-с полем ввода и строкой подсказок поверх `abbrev-wasm`.
+Рабочая демонстрация движка в браузере поверх `abbrev-wasm`. Полностью офлайн:
+словарь и языковая модель грузятся из assets, ничего не уходит на сервер.
+Это же — самый дешёвый способ собрать **реальные данные** о том, как люди
+сокращают слова: лог принятий — отдельный явный opt-in, **по умолчанию
+выключен** (включается галочкой в настройках; обучение и лог независимы).
+
+## Сборка и запуск
 
 ```bash
-cargo install wasm-pack
-wasm-pack build crates/abbrev-wasm --target web --release
+cargo install wasm-pack          # один раз
+./platforms/web/build.sh         # wasm + копии lexicon/lm в assets/
+python3 -m http.server -d platforms/web 8000
+# открыть http://localhost:8000/
 ```
+
+`build.sh` кладёт wasm-модуль в `platforms/web/pkg/` и копирует
+`data/lexicons/ru-50k.tsv` → `assets/lexicon.tsv`, `data/lm/ru-lm.tsv` →
+`assets/lm.tsv`. Обе папки в `.gitignore` — это артефакты сборки.
+
+Примечание: `wasm-opt` (binaryen) тянется с GitHub при сборке; он отключён в
+метаданных крейта (`wasm-opt = false`), поэтому модуль собирается офлайн —
+неоптимизированный, но рабочий (~210 КБ). Для релиза włącz wasm-opt.
+
+## Что показывает демо
+
+- лента подсказок по мере ввода (порог ≥ 3 символов, как в ядре);
+- тап по чипу — вставить лучшую форму; `▾` — попап форм слова (hold-список);
+- контекст: предыдущие 1–2 слова идут в LM (`в првт` ≠ `ну првт`);
+- обучение на выборе: `accept()` + история в `localStorage`,
+  восстанавливается при загрузке;
+- настройки: обучение on/off, контекст (LM) on/off, лог принятий on/off
+  (по умолчанию выключен);
+- экспорт: история (TSV, формат `import_history`) и **лог принятий** (JSONL:
+  сокращение, контекст, показанные варианты, выбор, ранг, из hold ли).
+
+## Контракт движка (тот же, что у нативных оболочек)
 
 ```js
 import init, { WasmEngine } from "./pkg/abbrev_wasm.js";
-
 await init();
-const engine = new WasmEngine(undefined);            // демо-лексикон
-// const engine = new WasmEngine(await (await fetch("lexicon.tsv")).text());
-
-const suggestions = JSON.parse(engine.suggest_json("првт", "", 5));
-// [{form: "привет", lemma: "привет", score: ...}, ...]
-
-engine.accept("првт", "привет");                     // персонализация
-localStorage.setItem("abbrev-history", engine.export_history());
+const engine = new WasmEngine(lexiconTsv);   // или new WasmEngine(undefined) — демо-словарь
+engine.load_language_model(lmTsv);           // опционально
+JSON.parse(engine.suggest_grouped_json("рбте", "по", 6)); // [{lemma, best, variants}]
+engine.accept("рбте", "работе");
+localStorage.setItem("abbrev.history", engine.export_history());
 ```
 
-История хранится в `localStorage` (или IndexedDB) — движок отдаёт/принимает
-непрозрачный блоб, как и на остальных платформах. Тот же код пригоден для
-расширения браузера (content script на полях ввода).
+Проверено в Node на боевых данных (тот же биндинг, что в браузере):
+`првт → привет`, `с другой стрны → стороны`,
+`рбте → работе | hold: работу работа работы`.

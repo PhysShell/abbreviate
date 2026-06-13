@@ -9,7 +9,11 @@
 //!
 //! ```text
 //! lexicon-builder input.tsv -o lexicon.tsv [--min-freq 1.0]
+//! lexicon-builder bigrams corpus.txt --lexicon lexicon.tsv -o lm.tsv \
+//!     [--top 150000] [--min-count 3]
 //! ```
+
+mod bigrams;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -17,7 +21,10 @@ use std::process::ExitCode;
 use abbrev_core::alphabet::normalize;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("bigrams") {
+        return bigrams::cmd_bigrams(args.split_off(1));
+    }
     let mut input: Option<String> = None;
     let mut output: Option<String> = None;
     let mut min_freq = 0.0f32;
