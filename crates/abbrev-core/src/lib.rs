@@ -30,6 +30,7 @@ pub mod engine;
 pub mod history;
 pub mod index;
 pub mod lexicon;
+pub mod morph;
 pub mod ngram;
 pub mod rank;
 pub mod shortcuts;

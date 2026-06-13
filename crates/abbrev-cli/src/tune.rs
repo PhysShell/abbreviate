@@ -140,6 +140,7 @@ fn jittered(base: &Weights, rng: &mut Rng, amount: f64) -> Weights {
         freq: (base.freq * rng.jitter(amount)).max(0.0),
         context: (base.context * rng.jitter(amount)).max(0.0),
         user: (base.user * rng.jitter(amount)).max(0.0),
+        morph: (base.morph * rng.jitter(amount)).max(0.0),
     }
 }
 

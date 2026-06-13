@@ -1,0 +1,22 @@
+# Case-agreement bench: input<TAB>expected<TAB>tag<TAB>context.
+# The input skeleton is case-ambiguous (all forms of the lemma share it);
+# the preposition in the context column should pull its governed case to
+# the top. Measures the morph_compatibility signal. A/B: run with the
+# grammeme-tagged lexicon (morph on) vs a 3-column copy (morph off).
+рбт	работе	case	в
+рбт	работы	case	для
+рбт	работу	case	про
+мшн	машине	case	в
+мшн	машину	case	про
+мшн	машины	case	для
+глв	голове	case	в
+глв	голову	case	про
+глв	головы	case	для
+кмнт	комнате	case	в
+кмнт	комнату	case	про
+кнг	книге	case	в
+кнг	книгу	case	про
+кнг	книги	case	для
+двр	двери	case	в
+стл	столе	case	на
+стл	стола	case	без

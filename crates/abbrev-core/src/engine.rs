@@ -13,6 +13,7 @@ use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
 use crate::index::{Indexes, delete_variants};
 use crate::lexicon::{EntryId, Lexicon};
+use crate::morph;
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
 use crate::shortcuts::Shortcuts;
 
@@ -214,6 +215,12 @@ impl Engine {
         let skeleton_chars: Vec<char> = input_skeleton.chars().collect();
         let cutoff = self.config.edit_cutoff_base
             + self.config.edit_cutoff_per_char * input_chars.len() as f32;
+        // Last context word, for preposition→case agreement (morph signal).
+        let prev_word = context
+            .previous_words
+            .last()
+            .map(|w| normalize(w.trim()))
+            .unwrap_or_default();
 
         let mut scored: Vec<(f32, EntryId)> = Vec::new();
         for id in self.collect_candidates(&norm, &input_skeleton) {
@@ -249,6 +256,7 @@ impl Engine {
                 log_frequency: (1.0 + entry.freq.max(0.0)).ln(),
                 context: self.context_model.score(context, &entry.form, &entry.lemma),
                 user_prior: self.history.prior(&input_skeleton, &form_norm),
+                morph_compatibility: morph::compatibility(&prev_word, &entry.tags),
             };
             scored.push((score(&signals, &self.config.weights), id));
         }
@@ -560,6 +568,33 @@ mod tests {
         // limit 0 yields nothing on both APIs, even for a shortcut hit.
         assert!(e.suggest("спс", &Context::default(), 0).is_empty());
         assert!(e.suggest_grouped("спс", &Context::default(), 0).is_empty());
+    }
+
+    #[test]
+    fn preposition_picks_the_case() {
+        // `рбт` is case-ambiguous across работа's forms (all share skeleton
+        // рбт). Without context, frequency picks the nominative; a preposition
+        // pulls its governed case to the top.
+        let tsv = "работа\tработа\t500\tNOUN,inan,femn,sing,nomn\n\
+                   работе\tработа\t200\tNOUN,inan,femn,sing,loct\n\
+                   работу\tработа\t300\tNOUN,inan,femn,sing,accs\n\
+                   работы\tработа\t250\tNOUN,inan,femn,sing,gent\n";
+        let e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
+        let top = |ctx: &[&str]| {
+            e.suggest(
+                "рбт",
+                &Context::new(ctx.iter().map(|s| s.to_string()).collect()),
+                1,
+            )
+            .first()
+            .map(|s| s.form.clone())
+            .unwrap_or_default()
+        };
+        assert_eq!(top(&[]), "работа"); // frequency, nominative
+        // «в» governs loc/acc → работе or работу, never the nominative.
+        assert!(matches!(top(&["в"]).as_str(), "работе" | "работу"));
+        // «для» governs genitive → работы.
+        assert_eq!(top(&["для"]), "работы");
     }
 
     #[test]
