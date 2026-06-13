@@ -177,6 +177,12 @@ impl Engine {
                 });
             }
         }
+        // Exact shortcuts already fill the strip: skip the full fuzzy
+        // retrieval/ranking entirely (a top-1 shortcut must not pay it).
+        if out.len() >= limit {
+            out.truncate(limit);
+            return out;
+        }
         for (score, id) in self.scored(input, context, limit) {
             if out.len() >= limit {
                 break;
@@ -526,6 +532,9 @@ mod tests {
             Some("спасибо")
         );
         assert_eq!(top_forms(&e, "мб", 3), vec!["может быть"]);
+        // When a shortcut already fills the limit, the fuzzy path is
+        // skipped but the result is still exactly the shortcut.
+        assert_eq!(top_forms(&e, "спс", 1), vec!["спасибо"]);
         // Non-shortcut input is unaffected.
         assert_eq!(top_forms(&e, "првт", 1), vec!["привет"]);
         // A grouped shortcut leads the strip.
