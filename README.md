@@ -32,6 +32,10 @@ cargo run --release -p abbrev-cli -- gen --lexicon data/lexicons/ru-50k.tsv \
 cargo run --release -p abbrev-cli -- bench /tmp/gen.tsv \
     --lexicon data/lexicons/ru-50k.tsv
 
+# автотюнинг весов на train/valid (вердикт ADOPT/KEEP BASELINE)
+cargo run --release -p abbrev-cli -- tune --train train.tsv --valid valid.tsv \
+    --lexicon data/lexicons/ru-50k.tsv --lm data/lm/ru-lm.tsv
+
 # тесты и линт
 cargo test --workspace
 cargo clippy --workspace --all-targets
