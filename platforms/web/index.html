@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>abbreviate — демо аббревиатурного ввода</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main>
+    <h1>abbreviate <small>демо</small></h1>
+    <p class="hint">
+      Пишите сокращение без гласных — движок предлагает полное слово.
+      Примеры: <code>првт</code>, <code>тстрние</code>, <code>сгдня</code>,
+      <code>рбте</code>. Тап по подсказке — вставить; <code>▾</code> — формы слова.
+      Всё работает офлайн в браузере; ничего не отправляется на сервер.
+    </p>
+
+    <div id="status" class="status">Загрузка движка…</div>
+
+    <div id="strip" class="strip" aria-label="подсказки"></div>
+    <textarea id="editor" rows="5" spellcheck="false"
+      placeholder="Начните печатать сокращение, например: ну првт" disabled></textarea>
+
+    <details class="settings">
+      <summary>Настройки и данные</summary>
+      <label><input type="checkbox" id="opt-learn" checked /> учиться на моём выборе</label>
+      <label><input type="checkbox" id="opt-context" checked /> использовать контекст (LM)</label>
+      <div class="data-row">
+        <button id="export-history">Экспорт истории (TSV)</button>
+        <button id="export-log">Экспорт лога принятий (JSONL)</button>
+        <button id="clear-data" class="danger">Очистить локальные данные</button>
+      </div>
+      <p class="privacy">
+        История и лог хранятся только в этом браузере (localStorage). Экспорт —
+        ручной. Лог принятий — это тот самый «реальный сигнал», которым позже
+        заменяется синтетический генератор: сокращение, контекст, показанные
+        варианты и ваш выбор.
+      </p>
+    </details>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

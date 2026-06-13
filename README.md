@@ -42,7 +42,8 @@ cargo clippy --workspace --all-targets
 | `crates/abbrev-wasm` | wasm-bindgen → web и webview-десктоп |
 | `crates/abbrev-cli` | dev-CLI: `suggest`, `repl`, `bench` |
 | `tools/lexicon-builder` | офлайн-конвейер сборки лексикона (OpenCorpora/НКРЯ → TSV) |
-| `platforms/*` | платформенные оболочки (Android — первая цель) |
+| `platforms/web` | рабочее браузерное демо (WASM) + opt-in лог принятий |
+| `platforms/{android,ios,desktop-tauri}` | оболочки-контракты (Android — первая нативная цель) |
 | `data/bench` | бенчмарк-наборы `вход → ожидание` |
 
 ## Состояние
@@ -62,5 +63,7 @@ cargo clippy --workspace --all-targets
 `стрны → страны`, но `с другой стрны → стороны`; `длми → для`, но
 `за длми → делами`. Сценарий `ну првт → привет` / `в првт → приват`
 закреплён юнит-тестом на синтетической LM — в субтитрах биграммы «в приват»
-нет (см. ограничение домена в BENCHMARKS.md). Следующий шаг —
-Android-оболочка. Дорожная карта — в конце ARCHITECTURE.md.
+нет (см. ограничение домена в BENCHMARKS.md). Работает web-демо поверх WASM (`platforms/web`): лента подсказок,
+hold-формы, обучение на выборе и opt-in лог принятий — самый дешёвый
+способ начать собирать реальные данные вместо гипотезы генератора.
+Следующие шаги — Android-оболочка, морфология. Дорожная карта — в конце ARCHITECTURE.md.
