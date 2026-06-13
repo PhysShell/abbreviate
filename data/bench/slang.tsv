@@ -1,0 +1,21 @@
+# Conventional-shortcut benchmark: shorthand<TAB>expected<TAB>tag.
+# These fail without the shortcuts layer (--shortcuts data/shortcuts/ru.tsv)
+# and are top-1 with it. Run:
+#   abbrev bench data/bench/slang.tsv --lexicon data/lexicons/ru-50k.tsv \
+#     --shortcuts data/shortcuts/ru.tsv
+спс	спасибо	slang
+пжлст	пожалуйста	slang
+плз	пожалуйста	slang
+щас	сейчас	slang
+крч	короче	slang
+оч	очень	slang
+норм	нормально	slang
+прив	привет	slang
+чел	человек	slang
+тока	только	slang
+скок	сколько	slang
+ваще	вообще	slang
+седня	сегодня	slang
+кста	кстати	slang
+мб	может быть	slang
+нзч	не за что	slang

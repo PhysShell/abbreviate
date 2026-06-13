@@ -22,6 +22,10 @@ cargo run -p abbrev-cli -- repl
 # приёмочный бенчмарк (22 кейса, регрессия контракта)
 cargo run -p abbrev-cli -- bench data/bench/basic.tsv
 
+# слой конвенциональных сокращений (сленг): спс→спасибо, мб→может быть
+cargo run -p abbrev-cli -- bench data/bench/slang.tsv \
+    --lexicon data/lexicons/ru-50k.tsv --shortcuts data/shortcuts/ru.tsv
+
 # честный бенчмарк: 20k сгенерированных сокращений на лексиконе 48k форм
 cargo run --release -p abbrev-cli -- gen --lexicon data/lexicons/ru-50k.tsv \
     --count 20000 --seed 42 -o /tmp/gen.tsv

@@ -4,7 +4,7 @@
 //!
 //! Build: `wasm-pack build crates/abbrev-wasm --target web`.
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -98,6 +98,13 @@ impl WasmEngine {
     pub fn load_language_model(&mut self, tsv: &str) -> Result<(), JsError> {
         let model = BigramModel::from_tsv_str(tsv).map_err(|e| JsError::new(&e.to_string()))?;
         self.inner.set_context_model(Box::new(model));
+        Ok(())
+    }
+
+    /// Loads the conventional-shortcuts layer.
+    pub fn load_shortcuts(&mut self, tsv: &str) -> Result<(), JsError> {
+        let shortcuts = Shortcuts::from_tsv_str(tsv).map_err(|e| JsError::new(&e.to_string()))?;
+        self.inner.set_shortcuts(shortcuts);
         Ok(())
     }
 

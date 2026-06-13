@@ -6,7 +6,9 @@
 
 import init, { WasmEngine } from "./pkg/abbrev_wasm.js";
 
-const MIN_LEN = 3; // matches EngineConfig::min_input_len
+// 2, not 3: conventional shortcuts (мб, ща) are shorter than the fuzzy
+// minimum; the engine returns only exact shortcut matches below length 3.
+const MIN_LEN = 2;
 const HISTORY_KEY = "abbrev.history.tsv";
 const LOG_KEY = "abbrev.acceptlog.jsonl";
 
@@ -34,12 +36,14 @@ async function boot() {
   try {
     await init();
     els.status.textContent = "Загрузка словаря…";
-    const [lexicon, lm] = await Promise.all([
+    const [lexicon, lm, shortcuts] = await Promise.all([
       fetchText("./assets/lexicon.tsv"),
       fetchText("./assets/lm.tsv").catch(() => null),
+      fetchText("./assets/shortcuts.tsv").catch(() => null),
     ]);
     engine = new WasmEngine(lexicon);
     if (lm) engine.load_language_model(lm);
+    if (shortcuts) engine.load_shortcuts(shortcuts);
     const saved = localStorage.getItem(HISTORY_KEY);
     if (saved) engine.import_history(saved);
     els.status.textContent = lm

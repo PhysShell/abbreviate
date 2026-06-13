@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
 
 uniffi::setup_scaffolding!();
 
@@ -33,6 +33,7 @@ pub struct SuggestionGroup {
 pub enum AbbrevError {
     InvalidLexicon { message: String },
     InvalidLanguageModel { message: String },
+    InvalidShortcuts { message: String },
 }
 
 impl fmt::Display for AbbrevError {
@@ -42,6 +43,7 @@ impl fmt::Display for AbbrevError {
             Self::InvalidLanguageModel { message } => {
                 write!(f, "invalid language model: {message}")
             }
+            Self::InvalidShortcuts { message } => write!(f, "invalid shortcuts: {message}"),
         }
     }
 }
@@ -143,6 +145,19 @@ impl AbbrevEngine {
             .lock()
             .expect("engine mutex poisoned")
             .set_context_model(Box::new(model));
+        Ok(())
+    }
+
+    /// Loads the conventional-shortcuts layer (`shorthand<TAB>form[<TAB>lemma]`).
+    pub fn load_shortcuts(&self, tsv: String) -> Result<(), AbbrevError> {
+        let shortcuts =
+            Shortcuts::from_tsv_str(&tsv).map_err(|e| AbbrevError::InvalidShortcuts {
+                message: e.to_string(),
+            })?;
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_shortcuts(shortcuts);
         Ok(())
     }
 

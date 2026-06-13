@@ -14,7 +14,7 @@ use std::io::{BufRead, Write as _};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,17 +34,25 @@ fn main() -> ExitCode {
 struct CommonOpts {
     lexicon: Lexicon,
     lm: Option<BigramModel>,
+    shortcuts: Option<Shortcuts>,
     limit: usize,
     context: Context,
     positional: Vec<String>,
 }
 
-/// Engine over the options' lexicon, with the bigram LM plugged in when
-/// `--lm` was given.
-fn build_engine(lexicon: Lexicon, lm: Option<BigramModel>) -> Engine {
-    let mut engine = Engine::new(lexicon);
+/// Engine over the options' lexicon, with the bigram LM and conventional
+/// shortcuts plugged in when `--lm` / `--shortcuts` were given.
+fn build_engine(
+    opts_lexicon: Lexicon,
+    lm: Option<BigramModel>,
+    shortcuts: Option<Shortcuts>,
+) -> Engine {
+    let mut engine = Engine::new(opts_lexicon);
     if let Some(lm) = lm {
         engine.set_context_model(Box::new(lm));
+    }
+    if let Some(sc) = shortcuts {
+        engine.set_shortcuts(sc);
     }
     engine
 }
@@ -52,6 +60,7 @@ fn build_engine(lexicon: Lexicon, lm: Option<BigramModel>) -> Engine {
 fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut lexicon_path: Option<String> = None;
     let mut lm_path: Option<String> = None;
+    let mut shortcuts_path: Option<String> = None;
     let mut limit = 5usize;
     let mut context = Context::default();
     let mut positional = Vec::new();
@@ -63,6 +72,9 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             }
             "--lm" => {
                 lm_path = Some(it.next().ok_or("--lm needs a path")?.to_string());
+            }
+            "--shortcuts" => {
+                shortcuts_path = Some(it.next().ok_or("--shortcuts needs a path")?.to_string());
             }
             "--limit" => {
                 limit = it
@@ -94,9 +106,18 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => None,
     };
+    let shortcuts = match shortcuts_path {
+        Some(path) => {
+            let tsv = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read shortcuts {path}: {e}"))?;
+            Some(Shortcuts::from_tsv_str(&tsv).map_err(|e| e.to_string())?)
+        }
+        None => None,
+    };
     Ok(CommonOpts {
         lexicon,
         lm,
+        shortcuts,
         limit,
         context,
         positional,
@@ -113,7 +134,7 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
     let Some(input) = opts.positional.first() else {
         return fail("suggest needs an input word, e.g. `abbrev suggest првт`");
     };
-    let engine = build_engine(opts.lexicon, opts.lm);
+    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts);
     let started = Instant::now();
     if grouped {
         // The two-level strip: one line per lemma, variants on "hold".
@@ -156,7 +177,7 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let mut engine = build_engine(opts.lexicon, opts.lm);
+    let mut engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts);
     eprintln!("abbrev repl — введите сокращение; `!N` принимает вариант N; пустая строка — выход");
     let stdin = std::io::stdin();
     let mut last_input = String::new();
@@ -242,7 +263,7 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
-    let engine = build_engine(opts.lexicon, opts.lm);
+    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts);
     let mut m = Metrics::default();
     let mut by_tag: BTreeMap<String, Metrics> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
