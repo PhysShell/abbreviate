@@ -259,6 +259,9 @@ impl Engine {
         context: &Context,
         limit: usize,
     ) -> Vec<SuggestionGroup> {
+        if limit == 0 {
+            return Vec::new();
+        }
         // Group over the *complete* ranked list: a form-rich lemma must
         // not push other lemmas out of the strip.
         let mut seen_lemmas: HashSet<String> = HashSet::new();
@@ -531,6 +534,9 @@ mod tests {
             groups.first().map(|g| g.best.form.as_str()),
             Some("спасибо")
         );
+        // limit 0 yields nothing on both APIs, even for a shortcut hit.
+        assert!(e.suggest("спс", &Context::default(), 0).is_empty());
+        assert!(e.suggest_grouped("спс", &Context::default(), 0).is_empty());
     }
 
     #[test]
