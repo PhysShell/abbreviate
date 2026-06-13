@@ -16,6 +16,7 @@ const els = {
   editor: document.getElementById("editor"),
   learn: document.getElementById("opt-learn"),
   context: document.getElementById("opt-context"),
+  log: document.getElementById("opt-log"),
   exportHistory: document.getElementById("export-history"),
   exportLog: document.getElementById("export-log"),
   clear: document.getElementById("clear-data"),
@@ -148,7 +149,11 @@ function choose(form, shorthand, context, rank, fromHold) {
     engine.accept(shorthand, form);
     localStorage.setItem(HISTORY_KEY, engine.export_history());
   }
-  logAcceptance({ shorthand, form, context, rank, fromHold });
+  // The acceptance log is a separate, explicit opt-in (off by default);
+  // disabling learning must never leave logging silently running.
+  if (els.log.checked) {
+    logAcceptance({ shorthand, form, context, rank, fromHold });
+  }
   render();
 }
 
