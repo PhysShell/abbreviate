@@ -50,7 +50,13 @@ fn main() -> ExitCode {
         }
     }
     let (Some(input), Some(output)) = (input, output) else {
-        return fail("usage: lexicon-builder <input> -o <output> [--min-freq N]");
+        return fail(
+            "usage:\n  \
+             lexicon-builder <input> -o <output> [--min-freq N]\n  \
+             lexicon-builder bigrams <corpus.txt> --lexicon <lexicon.tsv> -o <lm.tsv>\n  \
+             lexicon-builder rnc <freqrnc2011.csv> -o <rnc-freq.tsv>\n  \
+             lexicon-builder calibrate <lexicon.tsv> --rnc <rnc-freq.tsv> -o <out.tsv> [--max-len 4]",
+        );
     };
     let raw = match std::fs::read_to_string(&input) {
         Ok(r) => r,

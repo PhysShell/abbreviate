@@ -19,14 +19,17 @@
 //! rarer on screen than in a balanced corpus, so they get out-ranked. The
 //! correction is sound precisely for the closed indeclinable classes, where
 //! the surface form *is* the lemma, so the lemma-level ipm maps directly to
-//! the form's expected count (`ipm × N/1e6`, `N` = the lexicon's token
-//! total). Declinable parts of speech are left alone: there the lemma ipm is
-//! spread across forms and would over-inflate the nominative.
+//! the form's expected count (`ipm × N/1e6`, `N` = the lexicon token total
+//! *excluding the words being calibrated* — so the scale never feeds back on
+//! our own edits and the pass is idempotent). Declinable parts of speech are
+//! left alone: there the lemma ipm is spread across forms and would
+//! over-inflate the nominative.
 //!
 //! Conservative by construction: it only ever *raises* a frequency (a floor),
 //! never lowers one, so colloquial particles the subtitles over-count keep
 //! their place; and it is capped to short forms (`--max-len`, default 4),
-//! the length below which the calibration is benchmark-neutral. The raw
+//! the length below which the calibration is benchmark-neutral. Re-running on
+//! an already-calibrated lexicon is a no-op. The raw
 //! `freqrnc2011.csv` is **not** vendored (its licence is non-commercial,
 //! attribution-only); fetch it from <http://dict.ruslang.ru/freq.php>.
 
@@ -165,17 +168,23 @@ pub fn cmd_calibrate(args: Vec<String>) -> ExitCode {
         *floor.entry(norm).or_insert(0.0) += ipm;
     }
 
-    // Token total of the lexicon defines the ipm→count scale.
+    // Token total of the (non-calibrated part of the) lexicon defines the
+    // ipm→count scale. Words we floor are excluded from the denominator: their
+    // counts are exactly what we rewrite, so leaving them out keeps the scale
+    // independent of any prior calibration and makes the pass idempotent
+    // (re-running on the output changes nothing).
     let mut total = 0f64;
     for line in lex_raw.lines() {
         if line.starts_with('#') || line.trim().is_empty() {
             continue;
         }
-        if let Some(freq) = line
-            .split('\t')
-            .nth(2)
-            .and_then(|v| v.trim().parse::<f64>().ok())
-        {
+        let mut cols = line.split('\t');
+        let Some(form) = cols.next() else { continue };
+        // `nth(1)` skips the lemma column and yields the frequency.
+        let Some(freq) = cols.nth(1).and_then(|v| v.trim().parse::<f64>().ok()) else {
+            continue;
+        };
+        if !floor.contains_key(&normalize(form)) {
             total += freq;
         }
     }
@@ -200,11 +209,21 @@ pub fn cmd_calibrate(args: Vec<String>) -> ExitCode {
             continue;
         }
         let form = cols[0];
-        let cur: f64 = cols[2].trim().parse().unwrap_or(0.0);
-        let scaled = floor.get(&normalize(form)).map(|ipm| ipm * scale);
-        match scaled {
-            Some(s) if s > cur => {
-                let new_freq = s.round() as i64;
+        // A row whose frequency does not parse is data we don't understand —
+        // pass it through untouched rather than floor it from a bogus 0.0.
+        let Ok(cur) = cols[2].trim().parse::<f64>() else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
+        // Compare the rounded target against the current count so re-running on
+        // an already-calibrated lexicon is a true no-op (no rounding-noise
+        // "raises").
+        let new_freq = floor
+            .get(&normalize(form))
+            .map(|ipm| (ipm * scale).round() as i64);
+        match new_freq {
+            Some(new_freq) if (new_freq as f64) > cur => {
                 let mut rebuilt = format!("{form}\t{}\t{new_freq}", cols[1]);
                 // Preserve the optional 4th grammeme column verbatim.
                 for extra in &cols[3..] {
@@ -280,22 +299,39 @@ the\ts\t9.9\t10\t10\t10";
     /// lexicon that under-counts `при` and over-counts a colloquial particle.
     #[test]
     fn calibrate_raises_only_short_function_words_and_only_upward() {
-        let dir = std::env::temp_dir();
+        // Per-run subdirectory keeps parallel test runs from colliding.
+        let dir = std::env::temp_dir().join(format!(
+            "rnc_fix_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
         let csv = dir.join("rnc_fix.csv");
         let table = dir.join("rnc_fix_table.tsv");
         let lex = dir.join("rnc_fix_lex.tsv");
         let out = dir.join("rnc_fix_out.tsv");
         std::fs::write(&csv, RNC_FIXTURE).unwrap();
 
+        // `ExitCode` has no `PartialEq`, so we verify success through the
+        // artifact: the fresh per-run dir means a failed import leaves no
+        // stale table to mask the failure downstream.
         cmd_rnc(vec![
             csv.to_string_lossy().into(),
             "-o".into(),
             table.to_string_lossy().into(),
         ]);
+        assert!(
+            std::fs::read_to_string(&table).unwrap().contains("при\t"),
+            "rnc import did not produce the expected table"
+        );
 
-        // Lexicon token total = 1_000_000 → scale 1.0, so ipm maps to count
-        // 1:1. `при` is under-counted (100 < 1550); `стол` is a noun (skipped
-        // even though short); `поскольку` is long (> max-len 4, skipped).
+        // Non-candidate token total ≈ 1_000_000 → scale ≈ 1.0, so ipm maps to
+        // count ~1:1. `при` is under-counted (100 < 1550) and excluded from the
+        // denominator; `стол` is a noun (skipped even though short);
+        // `поскольку` is long (> max-len 4, skipped).
         std::fs::write(
             &lex,
             "# header\n\

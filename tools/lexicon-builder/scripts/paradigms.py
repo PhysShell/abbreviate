@@ -114,22 +114,24 @@ def main() -> int:
         inflected = parse.inflect(grammemes)
         return inflected.word if inflected else ""
 
-    def pick(lemma, pos):
+    def pick(parses, lemma, pos):
         # Pick the parse whose normal form is the lemma itself, so we inflect
         # the intended lexeme (e.g. for "стали" the verb "стать" is not what a
         # lemma-keyed paradigm wants).
         return next(
-            (p for p in morph.parse(lemma) if p.tag.POS == pos and p.normal_form == lemma),
+            (p for p in parses if p.tag.POS == pos and p.normal_form == lemma),
             None,
         )
 
     rows = []
     skipped = 0
     for lemma in lemmas:
+        # Parse once; NOUN and ADJF selection reuse the same analyses.
+        parses = morph.parse(lemma)
         # Noun coverage takes precedence over adjective coverage, so a
         # substantivized adjective ("красный") keeps its noun paradigm and
         # existing rows stay byte-identical.
-        noun = pick(lemma, "NOUN")
+        noun = pick(parses, lemma, "NOUN")
         if noun is not None:
             for number in NUMBERS:
                 forms = [cell(noun, {case, number}) for case in CASES]
@@ -139,7 +141,7 @@ def main() -> int:
                     rows.append(f"{lemma}\t{number}\t" + "|".join(forms))
             continue
 
-        adj = pick(lemma, "ADJF")
+        adj = pick(parses, lemma, "ADJF")
         if adj is not None:
             for gender in GENDERS:
                 forms = [cell(adj, {case, gender, "sing"}, True) for case in CASES]

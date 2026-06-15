@@ -270,7 +270,7 @@ flowchart LR
 Сейчас реализован импорт свободного TSV/CSV (`form;lemma;freq` или `form;freq`)
 и импорт частот НКРЯ: `lexicon-builder rnc freqrnc2011.csv -o rnc-freq.tsv`
 парсит частотный словарь Ляшевской–Шарова (`Lemma PoS Freq(ipm)…`) в таблицу
-`lemma<TAB>ipm<TAB>pos`, а `lexicon-builder calibrate lexicon.tsv --rnc … `
+`lemma<TAB>ipm<TAB>pos`, а `lexicon-builder calibrate lexicon.tsv --rnc …`
 поднимает частоту **коротких служебных слов** (≤4 букв; закрытые неизменяемые
 классы — предлоги, союзы, частицы, междометия, местоим. наречия) до
 сбалансированной корпусной (`ipm × N/1e6`, только вверх — floor). Это
