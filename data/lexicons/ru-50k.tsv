@@ -1,15 +1,18 @@
 # Russian surface-form frequency lexicon with lemmas.
 # Source: hermitdave/FrequencyWords 2018 ru_50k (OpenSubtitles), CC-BY-SA 4.0.
 # Rebuilt via: lexicon-builder ru_50k.txt -o ... + scripts/lemmatize.py (pymorphy3/OpenCorpora, MIT)
+# Short function words (≤4 chars) calibrated to balanced-corpus frequency via
+# lexicon-builder calibrate --rnc: Ляшевская О.Н., Шаров С.А., Частотный словарь
+# современного русского языка (НКРЯ), 2009/2011, http://dict.ruslang.ru/freq.php
 я	я	5081568	NPRO,1per sing,nomn
 не	не	4334804	PRCL
 что	что	3552532	CONJ
-в	в	2953981	PREP
-и	и	2917112	CONJ
+в	в	4465626	PREP
+и	и	5095825	CONJ
 ты	ты	2723798	NPRO,2per sing,nomn
 это	это	2640455	PRCL
-на	на	1655351	PREP
-с	с	1509844	PREP
+на	на	2258960	PREP
+с	с	1610655	PREP
 он	он	1283590	NPRO,masc,3per,Anph sing,nomn
 мы	мы	1214875	NPRO,1per plur,nomn
 как	как	1174339	CONJ
@@ -21,7 +24,7 @@
 меня	я	1010408	NPRO,1per sing,accs
 так	так	995583	CONJ
 но	но	990116	CONJ
-а	а	970725	CONJ
+а	а	1170543	CONJ
 его	он	752429	NPRO,masc,3per,Anph sing,accs
 все	всё	722378	PRCL
 она	она	713014	NPRO,femn,3per,Anph sing,nomn
@@ -36,14 +39,14 @@
 же	же	469511	PRCL
 есть	есть	450986	INFN,impf,tran
 просто	просто	450715	PRCL
-из	из	446361	PREP
-к	к	434512	PREP
-для	для	427940	PREP
+из	из	614045	PREP
+к	к	767040	PREP
+для	для	459640	PREP
 ну	ну	427366	PRCL
 когда	когда	421340	CONJ
 хорошо	хорошо	420527	ADVB,Prdx
 здесь	здесь	410266	ADVB,Prdx
-по	по	397721	PREP
+по	по	823646	PREP
 был	быть	393771	VERB,impf,intr masc,sing,past,indc
 знаю	знать	389247	VERB,impf,tran sing,1per,pres,indc
 то	то	385315	CONJ
@@ -53,7 +56,7 @@
 может	мочь	357142	VERB,impf,intr sing,3per,pres,indc
 нас	мы	351238	NPRO,1per plur,gent
 вот	вот	340913	PRCL
-от	от	339856	PREP
+от	от	522723	PREP
 быть	быть	313741	INFN,impf,intr
 кто	кто	299982	NPRO,masc sing,nomn
 будет	быть	298842	VERB,impf,intr sing,3per,futr,indc
@@ -64,7 +67,7 @@
 могу	мочь	280691	VERB,impf,intr sing,1per,pres,indc
 уже	уже	278258	ADVB
 спасибо	спасибо	273631	INTJ
-или	или	272568	CONJ
+или	или	333774	CONJ
 нам	мы	269029	NPRO,1per plur,datv
 еще	ещё	268978	ADVB
 там	там	264211	ADVB,Dmns
@@ -81,7 +84,7 @@
 ладно	ладный	229994	ADJS,Qual neut,sing
 знаешь	знать	228414	VERB,impf,tran sing,2per,pres,indc
 п	п	227298	NOUN,inan,femn,Fixd,Abbr sing,nomn
-до	до	221120	PREP
+до	до	293365	PREP
 этом	это	220811	NPRO,neut sing,loct
 потому	потому	218628	ADVB,Dmns
 теперь	теперь	216086	ADVB
@@ -95,7 +98,7 @@
 этот	этот	184623	ADJF,Subx,Apro,Anph inan,masc,sing,accs
 ли	ли	180914	CONJ
 пока	пока	179122	ADVB
-даже	даже	178504	PRCL
+даже	даже	205018	PRCL
 привет	привет	177992	NOUN,inan,masc sing,nomn
 сказал	сказать	174338	VERB,perf,tran masc,sing,past,indc
 себя	себя	172907	NPRO,Anph sing,accs
@@ -109,7 +112,7 @@
 того	тот	161739	ADJF,Subx,Apro,Anph neut,sing,gent
 тогда	тогда	159343	ADVB,Dmns
 него	он	155644	NPRO,masc,3per,Anph sing,gent,Af-p
-ни	ни	155085	PRCL
+ни	ни	199510	PRCL
 тут	тут	154726	ADVB,Dmns
 были	быть	154615	VERB,impf,intr plur,past,indc
 конечно	конечно	154334	CONJ,Prnt
@@ -133,7 +136,7 @@
 ей	она	123047	NPRO,femn,3per,Anph sing,datv
 должны	должный	120950	ADJS plur
 порядке	порядок	120906	NOUN,inan,masc sing,loct
-без	без	119843	PREP
+без	без	145010	PREP
 день	день	118088	NOUN,inan,masc sing,accs
 том	тот	117709	ADJF,Subx,Apro,Anph neut,sing,loct
 буду	быть	115292	VERB,impf,intr sing,1per,futr,indc
@@ -145,14 +148,14 @@
 после	после	109028	PREP
 этим	это	108025	NPRO,neut sing,ablt
 всего	весь	107074	ADJF,Subx,Apro neut,sing,gent
-во	в	106627	PREP Vpre
+во	в	167229	PREP Vpre
 твой	твой	105811	ADJF,Apro inan,masc,sing,accs
 ним	они	105636	NPRO,3per,Anph plur,datv,Af-p
 лет	год	102100	NOUN,inan,masc plur,gent
 боже	бог	101843	NOUN,anim,masc sing,voct
 них	они	101466	NPRO,3per,Anph plur,gent,Af-p
 сэр	сэр	101299	NOUN,anim,masc sing,nomn
-ведь	ведь	100777	PRCL
+ведь	ведь	101314	PRCL
 мистер	мистер	99992	NOUN,anim,masc sing,nomn
 жизнь	жизнь	99632	NOUN,inan,femn sing,accs
 потом	потом	99575	ADVB
@@ -178,7 +181,7 @@
 точно	точно	86897	ADVB
 человек	человек	86853	NOUN,anim,masc sing,nomn
 твоя	твой	86378	ADJF,Apro femn,sing,nomn
-под	под	86143	PREP
+под	под	160268	PREP
 сказала	сказать	85749	VERB,perf,tran femn,sing,past,indc
 назад	назад	85317	ADVB
 из-за	из-за	84610	PREP
@@ -236,7 +239,7 @@
 разве	разве	66146	PRCL
 слушай	слушать	65986	VERB,impf,tran sing,impr,excl
 своей	свой	65823	ADJF,Apro,Anph femn,sing,gent
-лишь	лишь	65808	PRCL
+лишь	лишь	79010	PRCL
 ага	ага	65490	INTJ
 можете	мочь	65480	VERB,impf,intr plur,2per,pres,indc
 простите	простить	65257	VERB,perf,tran plur,2per,futr,indc
@@ -305,7 +308,7 @@
 более	более	49014	ADVB
 надеюсь	надеяться	48947	VERB,impf,intr sing,1per,pres,indc
 итак	итак	48940	CONJ,Prnt
-при	при	48916	PREP
+при	при	220732	PREP
 ваша	ваш	48891	ADJF,Apro femn,sing,nomn
 вообще	вообще	48657	ADVB
 пошли	послать	48631	VERB,perf,tran sing,impr,excl
@@ -320,7 +323,7 @@
 всю	весь	46925	ADJF,Subx,Apro femn,sing,accs
 ребята	ребята	46567	NOUN,anim,GNdr,Pltm plur,nomn
 ко	к	46404	PREP Vpre
-хотя	хотя	46068	CONJ
+хотя	хотя	90496	CONJ
 понимаешь	понимать	45672	VERB,impf,tran sing,2per,pres,indc
 идти	идти	45654	INFN,impf,intr
 откуда	откуда	45596	ADVB,Ques
@@ -331,7 +334,7 @@
 извините	извинить	45074	VERB,perf,tran plur,2per,futr,indc
 вижу	видеть	44264	VERB,impf,tran sing,1per,pres,indc
 видеть	видеть	43923	INFN,impf,tran
-над	над	43810	PREP
+над	над	76434	PREP
 могут	мочь	43706	VERB,impf,intr plur,3per,pres,indc
 равно	равно	43637	CONJ
 мисс	мисс	43522	NOUN,anim,femn,Fixd sing,nomn
@@ -360,7 +363,7 @@
 вещи	вещь	40557	NOUN,inan,femn plur,accs
 могла	мочь	40427	VERB,impf,intr femn,sing,past,indc
 смотри	смотреть	40426	VERB,impf,tran sing,impr,excl
-хоть	хоть	40250	PRCL
+хоть	хоть	41462	PRCL
 работа	работа	40211	NOUN,inan,femn sing,nomn
 пару	пара	40153	NOUN,inan,femn sing,accs
 сын	сын	40105	NOUN,anim,masc sing,nomn
@@ -846,7 +849,7 @@
 маленький	маленький	16519	ADJF,Qual masc,sing,nomn
 пожаловать	пожаловать	16443	INFN,perf,tran
 школу	школа	16443	NOUN,inan,femn sing,accs
-либо	либо	16417	CONJ
+либо	либо	27855	CONJ
 забрать	забрать	16381	INFN,perf,tran
 прошло	пройти	16378	VERB,perf,tran neut,sing,past,indc
 особенно	особенно	16373	ADVB
@@ -1701,7 +1704,7 @@
 одежду	одежда	7403	NOUN,inan,femn sing,accs
 приходит	приходить	7402	VERB,impf,intr sing,3per,pres,indc
 расследование	расследование	7400	NOUN,inan,neut sing,accs
-зато	зато	7399	CONJ
+зато	зато	19201	CONJ
 девушкой	девушка	7393	NOUN,anim,femn sing,ablt
 яйца	яйцо	7360	NOUN,inan,neut sing,gent
 зависит	зависеть	7358	VERB,impf,intr sing,3per,pres,indc
@@ -1716,7 +1719,7 @@
 чисто	чисто	7301	ADVB
 начало	начало	7298	NOUN,inan,neut sing,nomn
 срочно	срочно	7298	ADVB
-вне	вне	7281	PREP
+вне	вне	8455	PREP
 клуб	клуб	7281	NOUN,inan,masc sing,nomn
 искал	искать	7276	VERB,impf,tran masc,sing,past,indc
 собираетесь	собираться	7276	VERB,impf,intr plur,2per,pres,indc
@@ -1795,7 +1798,7 @@
 брак	брак	6948	NOUN,inan,masc sing,accs
 представляешь	представлять	6948	VERB,impf,tran sing,2per,pres,indc
 остальных	остальной	6945	ADJF,Subx,Apro plur,gent
-мимо	мимо	6941	PREP
+мимо	мимо	10803	PREP
 поеду	поехать	6932	VERB,perf,intr sing,1per,futr,indc
 потерять	потерять	6930	INFN,perf,tran
 старые	старый	6913	ADJF,Qual plur,nomn
@@ -3426,7 +3429,7 @@
 относится	относиться	3445	VERB,impf,intr sing,3per,pres,indc
 стиле	стиль	3444	NOUN,inan,masc sing,loct
 виновен	виновный	3442	ADJS,Qual masc,sing
-изо	из	3442	PREP Vpre
+изо	из	4967	PREP Vpre
 джулия	джулия	3439	NOUN,anim,femn,Name sing,nomn
 скрывать	скрывать	3439	INFN,impf,tran
 фамилия	фамилия	3438	NOUN,inan,femn sing,nomn
@@ -3737,7 +3740,7 @@
 справедливо	справедливо	3147	ADVB
 дне	день	3145	NOUN,inan,masc sing,loct
 новом	новый	3145	ADJF,Qual masc,sing,loct
-ибо	ибо	3144	CONJ
+ибо	ибо	18503	CONJ
 фильмы	фильм	3144	NOUN,inan,masc plur,nomn
 стоишь	стоить	3143	VERB,impf,tran sing,2per,pres,indc
 передайте	передать	3142	VERB,perf,tran plur,impr,excl
@@ -4703,7 +4706,7 @@
 хейли	хейль	2441	NOUN,inan,masc plur,nomn
 я-я	я-я	2441	NPRO,1per sing,nomn
 веру	вера	2439	NOUN,inan,femn sing,accs
-эх	эх	2439	INTJ
+эх	эх	4384	INTJ
 законы	закон	2438	NOUN,inan,masc plur,nomn
 клиенты	клиент	2437	NOUN,anim,masc plur,nomn
 сомнений	сомнение	2437	NOUN,inan,neut plur,gent
@@ -5813,7 +5816,7 @@
 тереза	тереза	1944	NOUN,anim,femn,Name sing,nomn
 убедись	убедиться	1944	VERB,perf,intr sing,impr,excl
 эфир	эфир	1944	NOUN,inan,masc sing,accs
-а-а	а-а	1943	CONJ
+а-а	а-а	2534	CONJ
 макги	макг	1943	NOUN,inan,masc plur,nomn
 оплатить	оплатить	1943	INFN,perf,tran
 схватил	схватить	1943	VERB,perf,tran masc,sing,past,indc
@@ -5929,7 +5932,7 @@
 кармен	кармена	1900	NOUN,anim,femn,Name plur,gent
 озеро	озеро	1900	NOUN,inan,neut sing,nomn
 вошли	войти	1899	VERB,perf,intr plur,past,indc
-увы	увы	1899	INTJ
+увы	увы	7700	INTJ
 телевизору	телевизор	1898	NOUN,inan,masc sing,datv
 волю	воля	1897	NOUN,inan,femn sing,accs
 копия	копия	1897	NOUN,inan,femn sing,nomn
@@ -6136,7 +6139,7 @@
 открыла	открыть	1836	VERB,perf,tran femn,sing,past,indc
 секретов	секрет	1836	NOUN,inan,masc plur,gent
 специалист	специалист	1836	NOUN,anim,masc sing,nomn
-аж	аж	1833	CONJ
+аж	аж	3217	CONJ
 десерт	десерт	1833	NOUN,inan,masc sing,accs
 рене	рен	1833	NOUN,inan,masc sing,loct
 родом	род	1833	NOUN,inan,masc sing,ablt
@@ -6571,7 +6574,7 @@
 вампиров	вампир	1698	NOUN,anim,masc plur,gent
 виновным	виновный	1698	ADJF,Qual masc,sing,ablt
 предупредил	предупредить	1698	VERB,perf,tran masc,sing,past,indc
-фон	фон	1698	PRCL
+фон	фон	1751	PRCL
 зацени	заценить	1697	VERB,impf,tran sing,impr,excl
 отдавать	отдавать	1697	INFN,impf,tran
 посадили	посадить	1697	VERB,perf,tran plur,past,indc
@@ -8124,7 +8127,7 @@
 пятница	пятница	1348	NOUN,inan,femn sing,nomn
 баба	баба	1347	NOUN,anim,femn sing,nomn
 героин	героин	1347	NOUN,inan,masc sing,nomn
-дабы	дабы	1347	CONJ
+дабы	дабы	2790	CONJ
 поклонник	поклонник	1347	NOUN,anim,masc sing,nomn
 рискованно	рискованно	1347	ADVB
 судом	суд	1347	NOUN,inan,masc sing,ablt
@@ -11880,7 +11883,7 @@
 беном	бен	857	NOUN,anim,masc,Name sing,ablt
 брайен	брайена	857	NOUN,inan,femn plur,gent
 захотим	захотеть	857	VERB,perf,tran plur,1per,futr,indc
-коль	коль	857	CONJ
+коль	коль	1665	CONJ
 красавец	красавец	857	NOUN,anim,masc sing,nomn
 ну-ну	ну-ну	857	INTJ
 познакомьтесь	познакомиться	857	VERB,perf,intr plur,impr,excl
@@ -11925,7 +11928,7 @@
 передает	передавать	853	VERB,impf,tran sing,3per,pres,indc
 переночевать	переночевать	853	INFN,perf,intr
 подвел	подвести	853	VERB,perf,tran masc,sing,past,indc
-пред	пред	853	PREP
+пред	пред	1253	PREP
 рожу	рожа	853	NOUN,inan,femn sing,accs
 секретное	секретный	853	ADJF,Qual neut,sing,nomn
 слушают	слушать	853	VERB,impf,tran plur,3per,pres,indc
@@ -12020,7 +12023,7 @@
 саймона	саймон	846	NOUN,anim,masc,Name sing,gent
 верхней	верхний	845	ADJF femn,sing,loct
 круги	круг	845	NOUN,inan,masc plur,accs
-ото	от	845	PREP Vpre
+ото	от	1210	PREP Vpre
 пострадала	пострадать	845	VERB,perf,intr femn,sing,past,indc
 присутствия	присутствие	845	NOUN,inan,neut sing,gent
 старайся	стараться	845	VERB,impf,intr sing,impr,excl
@@ -12345,7 +12348,7 @@
 братик	братик	817	NOUN,anim,masc sing,nomn
 гордится	гордиться	817	VERB,impf,intr sing,3per,pres,indc
 грязных	грязный	817	ADJF,Qual plur,gent
-да-а	да-а	817	PRCL
+да-а	да-а	982	PRCL
 джекс	джекс	817	NOUN,inan,masc sing,nomn
 камнем	камень	817	NOUN,inan,masc sing,ablt
 лифчик	лифчик	817	NOUN,inan,masc sing,nomn
@@ -12984,7 +12987,7 @@
 фей	фея	771	NOUN,anim,femn plur,gent
 частиц	частица	771	NOUN,inan,femn plur,gent
 альбома	альбом	770	NOUN,inan,masc sing,gent
-ан	ан	770	CONJ
+ан	ан	1224	CONJ
 арестуйте	арестовать	770	VERB,perf,tran plur,impr,excl
 бегал	бегать	770	VERB,impf,intr masc,sing,past,indc
 воспитывать	воспитывать	770	INFN,impf,tran
@@ -13096,7 +13099,7 @@
 одиночества	одиночество	764	NOUN,inan,neut sing,gent
 открытыми	открытый	764	ADJF,Qual plur,ablt
 подвергать	подвергать	764	INFN,impf,tran
-поди	поди	764	INTJ
+поди	поди	1139	INTJ
 поттер	поттер	764	NOUN,anim,masc,Sgtm,Surn sing,nomn
 принадлежало	принадлежать	764	VERB,impf,intr neut,sing,past,indc
 присоединишься	присоединиться	764	VERB,perf,intr sing,2per,futr,indc
@@ -13182,7 +13185,7 @@
 прочего	прочее	759	NPRO,neut sing,gent
 возомнил	возомнить	758	VERB,perf,tran masc,sing,past,indc
 волну	волна	758	NOUN,inan,femn sing,accs
-мол	мол	758	PRCL
+мол	мол	14120	PRCL
 отъездом	отъезд	758	NOUN,inan,masc sing,ablt
 привезу	привезти	758	VERB,perf,tran sing,1per,futr,indc
 приглядывать	приглядывать	758	INFN,impf,tran
@@ -13828,7 +13831,7 @@
 бэрри	бэрри	716	NOUN,anim,masc,Fixd,Name sing,nomn
 вешай	вешать	716	VERB,impf,tran sing,impr,excl
 выслушайте	выслушать	716	VERB,perf,tran plur,impr,excl
-дак	дак	716	CONJ
+дак	дак	1395	CONJ
 дюжину	дюжина	716	NOUN,inan,femn sing,accs
 зайдет	зайти	716	VERB,perf,intr sing,3per,futr,indc
 идеальна	идеальный	716	ADJS,Qual femn,sing
@@ -13857,7 +13860,7 @@
 тайная	тайный	715	ADJF femn,sing,nomn
 тайные	тайный	715	ADJF plur,nomn
 тор	тор	715	NOUN,inan,masc sing,nomn
-тьфу	тьфу	715	INTJ
+тьфу	тьфу	1580	INTJ
 четырьмя	четыре	715	NUMR ablt
 шага	шаг	715	NOUN,inan,masc sing,gent
 бэн	бэн	714	UNKN
@@ -14523,7 +14526,7 @@
 гостем	гость	674	NOUN,anim,masc sing,ablt
 документами	документ	674	NOUN,inan,masc plur,ablt
 картошки	картошка	674	NOUN,inan,femn sing,gent
-коли	коли	674	CONJ
+коли	коли	2263	CONJ
 лукаса	лукас	674	NOUN,anim,masc,Name sing,gent
 молодую	молодой	674	ADJF,Qual femn,sing,accs
 переспали	переспать	674	VERB,perf,tran plur,past,indc
@@ -15108,7 +15111,7 @@
 семейных	семейный	640	ADJF,Qual plur,gent
 тактика	тактика	640	NOUN,inan,femn sing,nomn
 яхта	яхта	640	NOUN,inan,femn sing,nomn
-безо	без	639	PREP Vpre
+безо	без	1423	PREP Vpre
 впустил	впустить	639	VERB,perf,tran masc,sing,past,indc
 выключил	выключить	639	VERB,perf,tran masc,sing,past,indc
 германию	германия	639	NOUN,inan,femn,Sgtm,Geox sing,accs
@@ -15911,7 +15914,7 @@
 джулиетт	джулиетта	600	NOUN,anim,femn,Name plur,gent
 дочки	дочка	600	NOUN,anim,femn plur,nomn
 ловлю	ловить	600	VERB,impf,tran sing,1per,pres,indc
-ль	ль	600	CONJ
+ль	ль	1238	CONJ
 мышей	мышь	600	NOUN,anim,femn plur,gent
 обманывал	обманывать	600	VERB,impf,tran masc,sing,past,indc
 оружии	оружие	600	NOUN,inan,neut sing,loct
@@ -18160,7 +18163,7 @@
 трейлере	трейлер	509	NOUN,inan,masc sing,loct
 шкафа	шкаф	509	NOUN,inan,masc sing,gent
 эвакуация	эвакуация	509	NOUN,inan,femn sing,nomn
-але	але	508	NOUN,anim,masc,Sgtm,Fixd,Name sing,nomn
+але	але	541	NOUN,anim,masc,Sgtm,Fixd,Name sing,nomn
 аха	аха	508	UNKN
 брендан	брендать	508	PRTS,perf,past,pssv masc,sing
 воздействия	воздействие	508	NOUN,inan,neut sing,gent
@@ -19462,7 +19465,7 @@
 лягушка	лягушка	464	NOUN,anim,femn sing,nomn
 мариана	мариана	464	NOUN,anim,femn,Name sing,nomn
 марисоль	марисоль	464	NOUN,inan,femn sing,nomn
-меж	меж	464	PREP
+меж	меж	3160	PREP
 мышление	мышление	464	NOUN,inan,neut sing,accs
 нифига	нифига	464	NOUN,inan,femn sing,nomn
 огнестрельное	огнестрельный	464	ADJF neut,sing,nomn
@@ -26191,7 +26194,7 @@
 побереги	поберечь	318	VERB,perf,tran sing,impr,excl
 поддержала	поддержать	318	VERB,perf,tran femn,sing,past,indc
 поднимаюсь	подниматься	318	VERB,impf,intr sing,1per,pres,indc
-подо	под	318	PREP Vpre
+подо	под	569	PREP Vpre
 подстроено	подстроить	318	PRTS,perf,past,pssv neut,sing
 посредником	посредник	318	NOUN,anim,masc sing,ablt
 поцеловаться	поцеловаться	318	INFN,perf,intr
@@ -27420,7 +27423,7 @@
 заглядывать	заглядывать	299	INFN,impf,intr
 запрещена	запретить	299	PRTS,perf,past,pssv femn,sing
 захвачен	захватить	299	PRTS,perf,past,pssv masc,sing
-и-и	и-и	299	CONJ
+и-и	и-и	342	CONJ
 избиение	избиение	299	NOUN,inan,neut sing,nomn
 испуган	испуганный	299	ADJS,Qual masc,sing
 камерам	камера	299	NOUN,inan,femn plur,datv
@@ -28774,7 +28777,7 @@
 застукал	застукать	281	VERB,perf,tran masc,sing,past,indc
 использованы	использовать	281	PRTS,impf,past,pssv plur
 итоги	итог	281	NOUN,inan,masc plur,nomn
-ишь	ишь	281	INTJ
+ишь	ишь	1694	INTJ
 канзасе	канзас	281	NOUN,inan,masc,Geox sing,loct
 колонна	колонна	281	NOUN,inan,femn sing,nomn
 конкурент	конкурент	281	NOUN,anim,masc sing,nomn
@@ -30025,7 +30028,7 @@
 кранты	кранты	265	PRED,pres
 лечению	лечение	265	NOUN,inan,neut sing,datv
 ляг	лечь	265	VERB,perf,intr sing,impr,excl
-м-да	м-да	265	PRCL
+м-да	м-да	413	PRCL
 майра	майра	265	NOUN,inan,femn,Sgtm sing,nomn
 медведем	медведь	265	NOUN,anim,masc sing,ablt
 медуза	медуза	265	NOUN,anim,femn sing,nomn
@@ -33923,7 +33926,7 @@
 безупречный	безупречный	225	ADJF,Qual masc,sing,nomn
 беседовал	беседовать	225	VERB,impf,intr masc,sing,past,indc
 благородной	благородный	225	ADJF,Qual femn,sing,gent
-близ	близ	225	PREP
+близ	близ	1509	PREP
 везем	везти	225	VERB,impf,tran plur,1per,pres,indc
 взываю	взывать	225	VERB,impf,intr sing,1per,pres,indc
 восхитительные	восхитительный	225	ADJF,Qual plur,nomn
@@ -38244,7 +38247,7 @@
 мучаешь	мучить	190	VERB,impf,tran,Infr sing,2per,pres,indc
 мучительной	мучительный	190	ADJF,Qual femn,sing,ablt
 мэриан	мэриана	190	NOUN,anim,femn,Name plur,gent
-н-да	н-да	190	PRCL
+н-да	н-да	299	PRCL
 навязываться	навязываться	190	INFN,impf,intr
 надлежит	надлежать	190	VERB,impf,intr,Impe sing,pres,indc
 надрала	надрать	190	VERB,perf,tran femn,sing,past,indc
@@ -38333,7 +38336,7 @@
 ястреба	ястреб	190	NOUN,anim,masc sing,gent
 аника	аник	189	NOUN,anim,masc,Name sing,gent
 атланту	атланта	189	NOUN,inan,femn,Sgtm,Geox sing,accs
-ахти	ахти	189	INTJ
+ахти	ахти	256	INTJ
 берджесс	берджесс	189	NOUN,inan,masc sing,nomn
 беспредел	беспредел	189	NOUN,inan,masc sing,accs
 благополучия	благополучие	189	NOUN,inan,neut sing,gent
@@ -38394,7 +38397,7 @@
 нелепой	нелепый	189	ADJF,Qual femn,sing,ablt
 немца	немец	189	NOUN,anim,masc sing,accs
 ноздри	ноздря	189	NOUN,inan,femn plur,nomn
-ну-у	ну-у	189	INTJ
+ну-у	ну-у	313	INTJ
 нуждающихся	нуждаться	189	PRTF,Subx,impf,intr,pres,actv plur,gent
 обезьянки	обезьянка	189	NOUN,anim,femn sing,gent
 орочимару	орочимара	189	NOUN,inan,femn sing,accs
@@ -40138,7 +40141,7 @@
 центров	центр	178	NOUN,inan,masc plur,gent
 чемберлен	чемберлен	178	NOUN,anim,masc,Sgtm,Surn sing,nomn
 щекотки	щекотка	178	NOUN,inan,femn sing,gent
-эдак	эдак	178	ADVB
+эдак	эдак	797	ADVB
 эксклюзивный	эксклюзивный	178	ADJF masc,sing,nomn
 электроэнергии	электроэнергия	178	NOUN,inan,femn sing,gent
 элена	элена	178	NOUN,anim,femn,Name sing,nomn
@@ -42891,7 +42894,7 @@
 этажи	этаж	162	NOUN,inan,masc plur,nomn
 ядекюрэ	ядекюрэ	162	NOUN,inan,masc,Fixd,Abbr,Orgn sing,nomn
 янус	янус	162	NOUN,anim,masc,Name sing,nomn
-а-ля	а-ля	161	PREP
+а-ля	а-ля	299	PREP
 адаптация	адаптация	161	NOUN,inan,femn sing,nomn
 активное	активный	161	ADJF,Qual neut,sing,nomn
 актов	акт	161	NOUN,inan,masc plur,gent
@@ -46845,7 +46848,7 @@
 баком	бак	142	NOUN,inan,masc sing,ablt
 башен	башня	142	NOUN,inan,femn plur,gent
 берлогу	берлога	142	NOUN,inan,femn sing,accs
-бишь	бишь	142	PRCL
+бишь	бишь	911	PRCL
 блудный	блудный	142	ADJF,Qual masc,sing,nomn
 болты	болт	142	NOUN,inan,masc plur,nomn
 братаны	братан	142	NOUN,anim,masc plur,nomn
