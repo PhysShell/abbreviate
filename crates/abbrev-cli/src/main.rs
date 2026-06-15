@@ -1,7 +1,7 @@
 //! Developer CLI: the fastest feedback loop for engine work.
 //!
 //! ```text
-//! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped]
+//! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped] [--paradigms hold.tsv]
 //! abbrev repl [--lexicon path.tsv]
 //! abbrev bench data/bench/basic.tsv [--lexicon path.tsv] [--errors fails.tsv]
 //! abbrev gen --lexicon path.tsv --count 20000 --seed 42 -o cases.tsv
@@ -15,7 +15,7 @@ use std::io::{BufRead, Write as _};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Paradigms, Shortcuts};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,17 +39,19 @@ struct CommonOpts {
     lexicon: Lexicon,
     lm: Option<BigramModel>,
     shortcuts: Option<Shortcuts>,
+    paradigms: Option<Paradigms>,
     limit: usize,
     context: Context,
     positional: Vec<String>,
 }
 
-/// Engine over the options' lexicon, with the bigram LM and conventional
-/// shortcuts plugged in when `--lm` / `--shortcuts` were given.
+/// Engine over the options' lexicon, with the bigram LM, conventional
+/// shortcuts and hold-popup paradigms plugged in when their flags were given.
 fn build_engine(
     opts_lexicon: Lexicon,
     lm: Option<BigramModel>,
     shortcuts: Option<Shortcuts>,
+    paradigms: Option<Paradigms>,
 ) -> Engine {
     let mut engine = Engine::new(opts_lexicon);
     if let Some(lm) = lm {
@@ -58,6 +60,9 @@ fn build_engine(
     if let Some(sc) = shortcuts {
         engine.set_shortcuts(sc);
     }
+    if let Some(p) = paradigms {
+        engine.set_paradigms(p);
+    }
     engine
 }
 
@@ -65,6 +70,7 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut lexicon_path: Option<String> = None;
     let mut lm_path: Option<String> = None;
     let mut shortcuts_path: Option<String> = None;
+    let mut paradigms_path: Option<String> = None;
     let mut limit = 5usize;
     let mut context = Context::default();
     let mut positional = Vec::new();
@@ -79,6 +85,9 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             }
             "--shortcuts" => {
                 shortcuts_path = Some(it.next().ok_or("--shortcuts needs a path")?.to_string());
+            }
+            "--paradigms" => {
+                paradigms_path = Some(it.next().ok_or("--paradigms needs a path")?.to_string());
             }
             "--limit" => {
                 limit = it
@@ -118,10 +127,19 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => None,
     };
+    let paradigms = match paradigms_path {
+        Some(path) => {
+            let tsv = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read paradigms {path}: {e}"))?;
+            Some(Paradigms::from_tsv_str(&tsv))
+        }
+        None => None,
+    };
     Ok(CommonOpts {
         lexicon,
         lm,
         shortcuts,
+        paradigms,
         limit,
         context,
         positional,
@@ -138,7 +156,7 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
     let Some(input) = opts.positional.first() else {
         return fail("suggest needs an input word, e.g. `abbrev suggest првт`");
     };
-    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts);
+    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
     let started = Instant::now();
     if grouped {
         // The two-level strip: one line per lemma, variants on "hold".
@@ -181,7 +199,7 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let mut engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts);
+    let mut engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
     eprintln!("abbrev repl — введите сокращение; `!N` принимает вариант N; пустая строка — выход");
     let stdin = std::io::stdin();
     let mut last_input = String::new();
@@ -267,7 +285,7 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
-    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts);
+    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
     let mut m = Metrics::default();
     let mut by_tag: BTreeMap<String, Metrics> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
