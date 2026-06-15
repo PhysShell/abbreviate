@@ -22,8 +22,9 @@
 блгдрю	благодарю	aggr
 нрм	нормально	aggr
 
-# ultra-short (2 chars) — below the fuzzy threshold; need short-word/shortcut
-# layer (roadmap). Expected to MISS here; documents the gap.
+# ultra-short (2 chars) — below the fuzzy threshold; reachable only via the
+# exact-match shortcut layer. Run with `--shortcuts data/shortcuts/ru.tsv`
+# to resolve these (top-1 100%); without it they MISS, documenting the gap.
 зн	знаю	ultrashort
 гд	где	ultrashort
 ег	его	ultrashort
