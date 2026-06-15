@@ -41,6 +41,6 @@ pub use edit::EditCosts;
 pub use engine::{Engine, EngineConfig, Suggestion, SuggestionGroup};
 pub use lexicon::{Lexicon, LexiconEntry, LexiconError};
 pub use ngram::{BigramModel, LmError};
-pub use paradigm::{CaseForm, Number, ParadigmGroup, Paradigms};
+pub use paradigm::{CaseForm, Gender, Number, ParadigmGroup, Paradigms};
 pub use rank::Weights;
 pub use shortcuts::{ShortcutError, Shortcuts};

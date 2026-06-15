@@ -165,7 +165,9 @@ function openForms(anchor, group, shorthand, context) {
       section.className = "popup-group";
       const head = document.createElement("div");
       head.className = "popup-group-head";
-      head.textContent = grp.number;
+      // Adjective singulars carry a gender label ("ед." + "м. р."); nouns and
+      // plurals show the number alone.
+      head.textContent = grp.gender ? `${grp.number} ${grp.gender}` : grp.number;
       section.appendChild(head);
       for (const cell of grp.forms) section.appendChild(formButton(cell.form, cell.case));
       pop.appendChild(section);

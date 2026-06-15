@@ -267,14 +267,24 @@ flowchart LR
     ART --> AND2["assets Android"] & IOS2["bundle iOS"] & WEB2["fetch web"]
 ```
 
-Сейчас реализован импорт свободного TSV/CSV (`form;lemma;freq` или `form;freq`);
-импортёры OpenCorpora-XML и частотных списков НКРЯ — следующий шаг конвейера.
-Артефакт лексикона версионируется и собирается в CI, на устройстве никогда не
-строится.
+Сейчас реализован импорт свободного TSV/CSV (`form;lemma;freq` или `form;freq`)
+и импорт частот НКРЯ: `lexicon-builder rnc freqrnc2011.csv -o rnc-freq.tsv`
+парсит частотный словарь Ляшевской–Шарова (`Lemma PoS Freq(ipm)…`) в таблицу
+`lemma<TAB>ipm<TAB>pos`, а `lexicon-builder calibrate lexicon.tsv --rnc …`
+поднимает частоту **коротких служебных слов** (≤4 букв; закрытые неизменяемые
+классы — предлоги, союзы, частицы, междометия, местоим. наречия) до
+сбалансированной корпусной (`ipm × N/1e6`, только вверх — floor). Это
+исправляет регистровый перекос субтитров (книжные `ибо`, `при`, `по` редки на
+экране). Сырой `freqrnc2011.csv` не версионируется (лицензия НКРЯ —
+некоммерческая, с атрибуцией); скачивается с dict.ruslang.ru. Импортёр
+OpenCorpora-XML — следующий шаг. Артефакт лексикона версионируется и собирается
+в CI, на устройстве никогда не строится.
 
 **Морфология — build-time, не runtime.** `scripts/lemmatize.py` заполняет
 леммы/граммемы (анализ), а `scripts/paradigms.py` генерирует склонение
-(`data/lexicons/ru-hold-groups.tsv`: `lemma<TAB>число<TAB>падежи` для hold-popup).
+(`data/lexicons/ru-hold-groups.tsv`: `lemma<TAB>группа<TAB>падежи` для hold-popup,
+где группа — `sing`/`plur` у существительных и `sing.{masc,femn,neut}`/`plur`
+у прилагательных и местоимений-прилагательных).
 Оба используют **mawo-pymorphy3** — форк pymorphy с встроенными DAWG-словарями
 OpenCorpora 2025 (код MIT, словари CC BY-SA 3.0), что снимает зависимость от
 лежащего за Cloudflare OpenCorpora. Python-морфология — инструмент компиляции
