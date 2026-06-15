@@ -213,7 +213,10 @@ mod tests {
         let mut engine = WasmEngine::new(None).unwrap();
         engine.load_paradigms("работа\tsing\tработа|работы|работе|работу|работой|работе\n");
         let json = engine.paradigm_of_lemma_json("работа");
-        assert!(json.contains("\"им.\"") && json.contains("работе"), "{json}");
+        assert!(
+            json.contains("\"им.\"") && json.contains("работе"),
+            "{json}"
+        );
         // Unknown lemma → empty array so the caller falls back to flat forms.
         assert_eq!(engine.paradigm_of_lemma_json("несуществующее"), "[]");
     }
