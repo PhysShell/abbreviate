@@ -274,7 +274,9 @@ flowchart LR
 
 **Морфология — build-time, не runtime.** `scripts/lemmatize.py` заполняет
 леммы/граммемы (анализ), а `scripts/paradigms.py` генерирует склонение
-(`data/lexicons/ru-hold-groups.tsv`: `lemma<TAB>число<TAB>падежи` для hold-popup).
+(`data/lexicons/ru-hold-groups.tsv`: `lemma<TAB>группа<TAB>падежи` для hold-popup,
+где группа — `sing`/`plur` у существительных и `sing.{masc,femn,neut}`/`plur`
+у прилагательных и местоимений-прилагательных).
 Оба используют **mawo-pymorphy3** — форк pymorphy с встроенными DAWG-словарями
 OpenCorpora 2025 (код MIT, словари CC BY-SA 3.0), что снимает зависимость от
 лежащего за Cloudflare OpenCorpora. Python-морфология — инструмент компиляции

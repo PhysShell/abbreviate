@@ -139,9 +139,10 @@ impl Engine {
         self.context_model = model;
     }
 
-    /// Loads build-time noun declension paradigms (`ru-hold-groups.tsv`),
-    /// used to render an ordered case×number hold-popup instead of the
-    /// lexicon's incomplete frequency-sorted form pile.
+    /// Loads build-time declension paradigms (`ru-hold-groups.tsv`), used to
+    /// render an ordered hold-popup grid (case×number for nouns, case×gender
+    /// for adjectives) instead of the lexicon's incomplete frequency-sorted
+    /// form pile.
     pub fn set_paradigms(&mut self, paradigms: Paradigms) {
         self.paradigms = Some(paradigms);
     }
@@ -368,10 +369,11 @@ impl Engine {
             .collect()
     }
 
-    /// Structured declension of a lemma — singular/plural groups, each a
-    /// case-ordered list — for a grouped hold-popup. `None` when no generated
-    /// paradigm is loaded for the lemma (non-noun, or absent from the
-    /// artifact); callers should then fall back to [`forms_of_lemma`](Self::forms_of_lemma).
+    /// Structured declension of a lemma — number (and, for adjectives,
+    /// gender) groups, each a case-ordered list — for a grouped hold-popup.
+    /// `None` when no generated paradigm is loaded for the lemma (e.g. a
+    /// verb/adverb, or absent from the artifact); callers should then fall
+    /// back to [`forms_of_lemma`](Self::forms_of_lemma).
     pub fn paradigm_of_lemma(&self, lemma: &str) -> Option<&[ParadigmGroup]> {
         self.paradigms.as_ref().and_then(|p| p.get(lemma))
     }

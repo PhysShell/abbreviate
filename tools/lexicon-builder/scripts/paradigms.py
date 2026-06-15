@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
-"""Lexicon pipeline step: generate noun declension paradigms ("hold groups")
-from the lemmas of an engine lexicon.
+"""Lexicon pipeline step: generate declension paradigms ("hold groups") from
+the lemmas of an engine lexicon.
 
 The hold-popup shows the forms of a lemma when the user long-presses a
 suggestion. Returning every form in a pile is a "morphological salad"; the
-useful shape is a case-ordered grid, split by number. This tool emits that
+useful shape is a case-ordered grid, split into groups. This tool emits that
 grid so the runtime never has to inflect on device.
 
 It reads the lemma column (2nd) of a lexicon TSV, re-parses each distinct
-lemma, and for every noun lemma generates the six cases in each available
-number via morphological *generation* (`inflect`). Nouns carry lexical
-gender, so {case, number} fully determines the form — no gender dimension
-is needed (unlike adjectives/participles, deliberately out of scope here).
-Singularia/pluralia tantum naturally yield only the number that exists.
+lemma, and generates the six cases per group via morphological *generation*
+(`inflect`). Two parts of speech are covered, keyed by the group column:
 
-Output (sorted, one row per lemma+number, pipe-joined in fixed case order
+  * NOUN — nouns carry lexical gender, so {case, number} fully determines the
+    form. One group per number: `sing`, `plur`. Singularia/pluralia tantum
+    naturally yield only the number that exists.
+
+  * ADJF — full adjectives and adjectival pronouns (e.g. "мой", "этот",
+    "который"; pymorphy tags them ADJF) inflect by gender too, but only in
+    the singular. Groups: `sing.masc`, `sing.femn`, `sing.neut`, `plur`. The
+    accusative splits by animacy for the masculine singular and the plural
+    ("красный"/"красного", "красные"/"красных"); with no head noun to fix
+    animacy we emit the inanimate form (which equals the nominative), the
+    least-surprising default for a standalone grid.
+
+A lemma that parses as both (a substantivized adjective like "красный") is
+emitted as a NOUN — noun coverage takes precedence, so existing noun rows
+stay byte-identical when adjectives are added.
+
+Output (sorted, one row per lemma+group, pipe-joined in fixed case order
 nomn|gent|datv|accs|ablt|loct; empty slot = no such form):
 
-    lemma<TAB>number<TAB>nomn|gent|datv|accs|ablt|loct
+    lemma<TAB>group<TAB>nomn|gent|datv|accs|ablt|loct
     работа	sing	работа|работы|работе|работу|работой|работе
     работа	plur	работы|работ|работам|работы|работами|работах
+    красный	sing.masc	красный|красного|красному|красный|красным|красном
+    красный	sing.femn	красная|красной|красной|красную|красной|красной
+    красный	sing.neut	красное|красного|красному|красное|красным|красном
+    красный	plur	красные|красных|красным|красные|красными|красных
 
 Offline tooling only — never runs on device. Idempotent: same input ->
 byte-identical output.
@@ -36,6 +53,8 @@ import tempfile
 # columns line up with the engine's morphology layer.
 CASES = ["nomn", "gent", "datv", "accs", "ablt", "loct"]
 NUMBERS = ["sing", "plur"]
+# Gender axis for adjectives — singular only (the plural has no gender).
+GENDERS = ["masc", "femn", "neut"]
 
 
 def main() -> int:
@@ -81,39 +100,66 @@ def main() -> int:
         )
         return 1
 
-    rows = []
-    skipped_non_noun = 0
-    for lemma in lemmas:
-        # Pick the noun parse whose normal form is the lemma itself, so we
-        # inflect the intended lexeme (e.g. "стали" -> the verb "стать" is
-        # not what a lemma-keyed paradigm wants).
-        noun = next(
-            (
-                p
-                for p in morph.parse(lemma)
-                if p.tag.POS == "NOUN" and p.normal_form == lemma
-            ),
+    def cell(parse, grammemes, force_inan_accs=False):
+        """One declension cell. Adjectives split the accusative by the head
+        noun's animacy (masc singular and plural); with no head noun we force
+        the *inanimate* reading — which equals the nominative — for a
+        deterministic standalone grid. Nouns carry animacy lexically, so they
+        never force it (animacy-ambiguous nouns like "робот" thus keep the
+        accusative pymorphy already chose, leaving noun output unchanged)."""
+        if force_inan_accs and "accs" in grammemes:
+            forced = parse.inflect(grammemes | {"inan"})
+            if forced:
+                return forced.word
+        inflected = parse.inflect(grammemes)
+        return inflected.word if inflected else ""
+
+    def pick(lemma, pos):
+        # Pick the parse whose normal form is the lemma itself, so we inflect
+        # the intended lexeme (e.g. for "стали" the verb "стать" is not what a
+        # lemma-keyed paradigm wants).
+        return next(
+            (p for p in morph.parse(lemma) if p.tag.POS == pos and p.normal_form == lemma),
             None,
         )
-        if noun is None:
-            skipped_non_noun += 1
+
+    rows = []
+    skipped = 0
+    for lemma in lemmas:
+        # Noun coverage takes precedence over adjective coverage, so a
+        # substantivized adjective ("красный") keeps its noun paradigm and
+        # existing rows stay byte-identical.
+        noun = pick(lemma, "NOUN")
+        if noun is not None:
+            for number in NUMBERS:
+                forms = [cell(noun, {case, number}) for case in CASES]
+                # Drop a number the lexeme does not have (singularia/pluralia
+                # tantum) instead of emitting an all-empty row.
+                if any(forms):
+                    rows.append(f"{lemma}\t{number}\t" + "|".join(forms))
             continue
-        for number in NUMBERS:
-            forms = []
-            for case in CASES:
-                inflected = noun.inflect({case, number})
-                forms.append(inflected.word if inflected else "")
-            # Drop a number the lexeme does not have (singularia/pluralia
-            # tantum) instead of emitting an all-empty row.
-            if any(forms):
-                rows.append(f"{lemma}\t{number}\t" + "|".join(forms))
+
+        adj = pick(lemma, "ADJF")
+        if adj is not None:
+            for gender in GENDERS:
+                forms = [cell(adj, {case, gender, "sing"}, True) for case in CASES]
+                if any(forms):
+                    rows.append(f"{lemma}\tsing.{gender}\t" + "|".join(forms))
+            plur = [cell(adj, {case, "plur"}, True) for case in CASES]
+            if any(plur):
+                rows.append(f"{lemma}\tplur\t" + "|".join(plur))
+            continue
+
+        skipped += 1
 
     rows.sort()
     header = (
-        "# Russian noun declension paradigms (hold-popup groups).\n"
+        "# Russian declension paradigms (hold-popup groups): nouns by number,\n"
+        "# adjectives/adjectival pronouns by gender (singular) and number.\n"
         "# Generated by scripts/paradigms.py from the lexicon's lemmas via\n"
         "# mawo-pymorphy3 (OpenCorpora 2025 dicts, CC BY-SA 3.0).\n"
-        "# lemma<TAB>number<TAB>nomn|gent|datv|accs|ablt|loct  (empty = no form)\n"
+        "# lemma<TAB>group<TAB>nomn|gent|datv|accs|ablt|loct  (empty = no form)\n"
+        "# group = sing|plur | sing.masc|sing.femn|sing.neut\n"
     )
     # Atomic replace: a crash mid-write must not corrupt the artifact.
     out_dir = os.path.dirname(out) or "."
@@ -133,7 +179,7 @@ def main() -> int:
         raise
     print(
         f"wrote {out}: {len(rows)} paradigm rows "
-        f"({len(lemmas)} lemmas, {skipped_non_noun} non-noun skipped)",
+        f"({len(lemmas)} lemmas, {skipped} non-declinable skipped)",
         file=sys.stderr,
     )
     return 0
