@@ -40,14 +40,16 @@ async function boot() {
   try {
     await init();
     els.status.textContent = "Загрузка словаря…";
-    const [lexicon, lm, shortcuts] = await Promise.all([
+    const [lexicon, lm, shortcuts, paradigms] = await Promise.all([
       fetchText("./assets/lexicon.tsv"),
       fetchText("./assets/lm.tsv").catch(() => null),
       fetchText("./assets/shortcuts.tsv").catch(() => null),
+      fetchText("./assets/hold-groups.tsv").catch(() => null),
     ]);
     engine = new WasmEngine(lexicon);
     if (lm) engine.load_language_model(lm);
     if (shortcuts) engine.load_shortcuts(shortcuts);
+    if (paradigms) engine.load_paradigms(paradigms);
     const saved = localStorage.getItem(HISTORY_KEY);
     if (saved) engine.import_history(saved);
     els.status.textContent = lm
@@ -133,12 +135,45 @@ function openForms(anchor, group, shorthand, context) {
   const pop = document.createElement("div");
   pop.className = "popup";
   pop.id = "forms-popup";
-  for (const form of [group.best.form, ...group.variants]) {
+
+  const formButton = (form, label) => {
     const b = document.createElement("button");
-    b.textContent = form;
+    if (label) {
+      const tag = document.createElement("span");
+      tag.className = "case-tag";
+      tag.textContent = label;
+      b.append(tag, form);
+    } else {
+      b.textContent = form;
+    }
     b.addEventListener("click", () => choose(form, shorthand, context, 0, true));
-    pop.appendChild(b);
+    return b;
+  };
+
+  // Prefer the generated declension grid (ед./мн. × cases); fall back to the
+  // flat frequency list when the lemma has no paradigm (non-nouns).
+  let paradigm = [];
+  try {
+    paradigm = JSON.parse(engine.paradigm_of_lemma_json(group.lemma));
+  } catch {
+    paradigm = [];
   }
+  if (paradigm.length) {
+    pop.classList.add("grouped");
+    for (const grp of paradigm) {
+      const section = document.createElement("div");
+      section.className = "popup-group";
+      const head = document.createElement("div");
+      head.className = "popup-group-head";
+      head.textContent = grp.number;
+      section.appendChild(head);
+      for (const cell of grp.forms) section.appendChild(formButton(cell.form, cell.case));
+      pop.appendChild(section);
+    }
+  } else {
+    for (const form of [group.best.form, ...group.variants]) pop.appendChild(formButton(form));
+  }
+
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.left = `${window.scrollX + r.left}px`;

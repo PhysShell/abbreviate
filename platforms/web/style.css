@@ -121,6 +121,24 @@ h1 small { color: var(--muted); font-size: 0.5em; font-weight: 400; }
 }
 .popup button:hover { background: var(--accent); color: var(--accent-ink); }
 
+/* Grouped declension grid: singular / plural side by side, case-labeled. */
+.popup.grouped { display: flex; gap: 0.4rem; }
+.popup-group { min-width: 8.5rem; }
+.popup-group-head {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.2rem 0.7rem 0.3rem;
+}
+.popup .case-tag {
+  display: inline-block;
+  width: 2.4rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.popup button:hover .case-tag { color: var(--accent-ink); }
+
 .settings { margin-top: 2rem; color: var(--muted); }
 .settings summary { cursor: pointer; }
 .settings label { display: block; margin: 0.6rem 0; color: var(--ink); }
