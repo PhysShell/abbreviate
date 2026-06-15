@@ -1,0 +1,20 @@
+# Offline benchmark: input<TAB>expected surface form.
+# Regression guard for the function-word / connective surface — prepositions,
+# conjunctions, particles and connective adverbs that the lexicon (incl. the
+# RNC short-word calibration) should keep resolving. These are NOT a proof of
+# the calibration win (most resolve regardless); they pin the area so future
+# lexicon or ranking changes can't silently break common connectives.
+# Run: cargo run -p abbrev-cli -- bench data/bench/function.tsv
+пскльк	поскольку
+нскльк	несколько
+чтбы	чтобы
+птму	потому
+тлк	только
+крм	кроме
+мжду	между
+чрз	через
+псл	после
+хтя	хотя
+ткж	также
+пртв	против
+ибо	ибо
