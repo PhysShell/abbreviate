@@ -9,10 +9,12 @@
 //! + w_freq  * log_frequency
 //! + w_ctx   * context_lm_score
 //! + w_user  * user_history_prior
+//! + w_morph * morph_compatibility
 //! ```
 //!
-//! Morphological plausibility (`w_morph`) is reserved for the stage where a
-//! paradigm-aware lexicon lands; until then suffix compatibility carries it.
+//! `morph_compatibility` is case agreement with a preceding preposition
+//! (`в работе`, not `в работу`), available once the lexicon carries
+//! grammemes; it is a soft, never-negative boost.
 
 /// Weights of the linear ranking model. Tuned on the offline benchmark
 /// (`abbrev-cli bench`), not by intuition.
@@ -27,6 +29,9 @@ pub struct Weights {
     pub freq: f32,
     pub context: f32,
     pub user: f32,
+    /// Reward for grammatical case agreement with the left context
+    /// (preposition government).
+    pub morph: f32,
 }
 
 impl Default for Weights {
@@ -41,6 +46,7 @@ impl Default for Weights {
             freq: 0.6,
             context: 1.0,
             user: 1.0,
+            morph: 1.0,
         }
     }
 }
@@ -67,6 +73,8 @@ pub struct Signals {
     pub context: f32,
     /// User-history prior.
     pub user_prior: f32,
+    /// Case agreement with the preceding preposition (0.0 or 1.0).
+    pub morph_compatibility: f32,
 }
 
 pub fn score(signals: &Signals, w: &Weights) -> f32 {
@@ -77,6 +85,7 @@ pub fn score(signals: &Signals, w: &Weights) -> f32 {
         + w.freq * signals.log_frequency
         + w.context * signals.context
         + w.user * signals.user_prior
+        + w.morph * signals.morph_compatibility
 }
 
 /// Longest common prefix of two char slices.
@@ -109,6 +118,7 @@ mod tests {
             log_frequency: 0.0,
             context: 0.0,
             user_prior: 0.0,
+            morph_compatibility: 0.0,
         };
         let frequent = Signals {
             log_frequency: 5.0,

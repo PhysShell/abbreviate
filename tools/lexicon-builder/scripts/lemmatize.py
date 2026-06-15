@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Lexicon pipeline step: fill the lemma column of an engine TSV.
+"""Lexicon pipeline step: fill the lemma and grammeme columns of an engine
+TSV (`form<TAB>lemma<TAB>freq` -> `form<TAB>lemma<TAB>freq<TAB>tags`).
 
 Uses pymorphy3 (the maintained pymorphy2 fork; OpenCorpora dictionaries,
-MIT) and takes the most probable parse per surface form. Offline tooling
-only — never runs on device.
+MIT) and takes the most probable parse per surface form; the grammeme tag
+of that parse (e.g. `NOUN,inan,femn,sing,loct`) becomes the 4th column,
+consumed by abbrev_core::morph for case agreement. Offline tooling only —
+never runs on device. Idempotent: re-running on a 4-column file is fine.
 
     pip install pymorphy3 pymorphy3-dicts-ru
     python3 lemmatize.py data/lexicons/ru-50k.tsv
@@ -46,11 +49,17 @@ def main() -> int:
             if not line or line.startswith("#"):
                 out_lines.append(line)
                 continue
-            form, lemma, freq = line.split("\t")
-            new_lemma = morph.parse(form)[0].normal_form
+            parts = line.split("\t")
+            form, lemma, freq = parts[0], parts[1], parts[2]
+            parse = morph.parse(form)[0]
+            new_lemma = parse.normal_form
+            # Tag as a comma-joined grammeme string (abbrev_core::morph splits
+            # on commas and spaces, so pymorphy's "NOUN,inan femn,sing,loct" is
+            # fine); tabs/newlines can't occur in grammeme tags.
+            tags = str(parse.tag)
             if new_lemma != lemma:
                 changed += 1
-            out_lines.append(f"{form}\t{new_lemma}\t{freq}")
+            out_lines.append(f"{form}\t{new_lemma}\t{freq}\t{tags}")
     # Atomic replace: a crash mid-write must not corrupt the artifact.
     fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".tmp")
     try:

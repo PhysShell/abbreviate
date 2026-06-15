@@ -22,11 +22,22 @@ cargo run -p abbrev-cli -- repl
 # приёмочный бенчмарк (22 кейса, регрессия контракта)
 cargo run -p abbrev-cli -- bench data/bench/basic.tsv
 
+# слой конвенциональных сокращений (сленг): спс→спасибо, мб→может быть
+cargo run -p abbrev-cli -- bench data/bench/slang.tsv \
+    --lexicon data/lexicons/ru-50k.tsv --shortcuts data/shortcuts/ru.tsv
+
+# транслит-термины (тот же слой): гитхаб→GitHub, докер→Docker, телега→Telegram
+cargo run -p abbrev-cli -- suggest гитхаб --shortcuts data/translit/ru-tech.tsv
+
 # честный бенчмарк: 20k сгенерированных сокращений на лексиконе 48k форм
 cargo run --release -p abbrev-cli -- gen --lexicon data/lexicons/ru-50k.tsv \
     --count 20000 --seed 42 -o /tmp/gen.tsv
 cargo run --release -p abbrev-cli -- bench /tmp/gen.tsv \
     --lexicon data/lexicons/ru-50k.tsv
+
+# автотюнинг весов на train/valid (вердикт ADOPT/KEEP BASELINE)
+cargo run --release -p abbrev-cli -- tune --train train.tsv --valid valid.tsv \
+    --lexicon data/lexicons/ru-50k.tsv --lm data/lm/ru-lm.tsv
 
 # тесты и линт
 cargo test --workspace
@@ -63,7 +74,11 @@ cargo clippy --workspace --all-targets
 `стрны → страны`, но `с другой стрны → стороны`; `длми → для`, но
 `за длми → делами`. Сценарий `ну првт → привет` / `в првт → приват`
 закреплён юнит-тестом на синтетической LM — в субтитрах биграммы «в приват»
-нет (см. ограничение домена в BENCHMARKS.md). Работает web-демо поверх WASM (`platforms/web`): лента подсказок,
+нет (см. ограничение домена в BENCHMARKS.md).
+Морфология (граммемы OpenCorpora в 4-й колонке лексикона) добавляет сигнал
+согласования падежа с управляющим предлогом: `рбт → работе` после «в»,
+`→ работы` после «для», `→ работу` после «про» — **+23пп top-1** на
+падежно-неоднозначных кейсах, без регрессий. Работает web-демо поверх WASM (`platforms/web`): лента подсказок,
 hold-формы, обучение на выборе и opt-in лог принятий — самый дешёвый
 способ начать собирать реальные данные вместо гипотезы генератора.
-Следующие шаги — Android-оболочка, морфология. Дорожная карта — в конце ARCHITECTURE.md.
+Следующий шаг — Android-оболочка. Дорожная карта — в конце ARCHITECTURE.md.

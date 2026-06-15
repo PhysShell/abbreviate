@@ -13,7 +13,9 @@ use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
 use crate::index::{Indexes, delete_variants};
 use crate::lexicon::{EntryId, Lexicon};
+use crate::morph;
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
+use crate::shortcuts::Shortcuts;
 
 /// Endings used to route an input like `тстрние` into the right
 /// reverse-suffix bucket. Ordered longest-first at lookup time.
@@ -96,8 +98,13 @@ pub struct Engine {
     by_lemma: HashMap<String, Vec<EntryId>>,
     history: UserHistory,
     context_model: Box<dyn ContextModel>,
+    shortcuts: Shortcuts,
     config: EngineConfig,
 }
+
+/// Score given to an exact conventional-shortcut hit — above any ranked
+/// lexicon candidate, so a typed shorthand is always offered first.
+const SHORTCUT_SCORE: f32 = 1000.0;
 
 impl Engine {
     pub fn new(lexicon: Lexicon) -> Self {
@@ -119,6 +126,7 @@ impl Engine {
             by_lemma,
             history: UserHistory::default(),
             context_model: Box::new(NoContext),
+            shortcuts: Shortcuts::default(),
             config,
         }
     }
@@ -126,6 +134,17 @@ impl Engine {
     /// Plugs in a contextual reranker (n-gram LM, neural model, ...).
     pub fn set_context_model(&mut self, model: Box<dyn ContextModel>) {
         self.context_model = model;
+    }
+
+    /// Loads the conventional-shortcuts layer (exact-match shorthand).
+    pub fn set_shortcuts(&mut self, shortcuts: Shortcuts) {
+        self.shortcuts = shortcuts;
+    }
+
+    /// Replaces the ranking weights without rebuilding indexes — weights do
+    /// not affect retrieval, so this is cheap (used by `abbrev tune`).
+    pub fn set_weights(&mut self, weights: Weights) {
+        self.config.weights = weights;
     }
 
     pub fn config(&self) -> &EngineConfig {
@@ -142,19 +161,44 @@ impl Engine {
     /// digits, Latin letters, `_`, `@`, URLs, code — is left untouched
     /// (returns no suggestions).
     pub fn suggest(&self, input: &str, context: &Context, limit: usize) -> Vec<Suggestion> {
-        let mut scored = self.scored(input, context, limit);
-        scored.truncate(limit);
-        scored
-            .into_iter()
-            .map(|(score, id)| {
-                let entry = self.lexicon.get(id);
-                Suggestion {
+        if limit == 0 {
+            return Vec::new();
+        }
+        // Conventional shortcuts first (exact match, even below the fuzzy
+        // length threshold), then ranked lexicon candidates, deduped.
+        let norm = normalize(input.trim());
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut out: Vec<Suggestion> = Vec::new();
+        for exp in self.shortcuts.get(&norm) {
+            if seen.insert(normalize(&exp.form)) {
+                out.push(Suggestion {
+                    form: exp.form.clone(),
+                    lemma: exp.lemma.clone(),
+                    score: SHORTCUT_SCORE,
+                });
+            }
+        }
+        // Exact shortcuts already fill the strip: skip the full fuzzy
+        // retrieval/ranking entirely (a top-1 shortcut must not pay it).
+        if out.len() >= limit {
+            out.truncate(limit);
+            return out;
+        }
+        for (score, id) in self.scored(input, context, limit) {
+            if out.len() >= limit {
+                break;
+            }
+            let entry = self.lexicon.get(id);
+            if seen.insert(normalize(&entry.form)) {
+                out.push(Suggestion {
                     form: entry.form.clone(),
                     lemma: entry.lemma.clone(),
                     score,
-                }
-            })
-            .collect()
+                });
+            }
+        }
+        out.truncate(limit);
+        out
     }
 
     /// Full ranked candidate list (score, id), best first. The grouped
@@ -171,6 +215,12 @@ impl Engine {
         let skeleton_chars: Vec<char> = input_skeleton.chars().collect();
         let cutoff = self.config.edit_cutoff_base
             + self.config.edit_cutoff_per_char * input_chars.len() as f32;
+        // Last context word, for preposition→case agreement (morph signal).
+        let prev_word = context
+            .previous_words
+            .last()
+            .map(|w| normalize(w.trim()))
+            .unwrap_or_default();
 
         let mut scored: Vec<(f32, EntryId)> = Vec::new();
         for id in self.collect_candidates(&norm, &input_skeleton) {
@@ -206,6 +256,7 @@ impl Engine {
                 log_frequency: (1.0 + entry.freq.max(0.0)).ln(),
                 context: self.context_model.score(context, &entry.form, &entry.lemma),
                 user_prior: self.history.prior(&input_skeleton, &form_norm),
+                morph_compatibility: morph::compatibility(&prev_word, &entry.tags),
             };
             scored.push((score(&signals, &self.config.weights), id));
         }
@@ -222,10 +273,38 @@ impl Engine {
         context: &Context,
         limit: usize,
     ) -> Vec<SuggestionGroup> {
+        if limit == 0 {
+            return Vec::new();
+        }
         // Group over the *complete* ranked list: a form-rich lemma must
         // not push other lemmas out of the strip.
         let mut seen_lemmas: HashSet<String> = HashSet::new();
         let mut groups = Vec::new();
+        // Conventional shortcuts lead, each as its own group; hold variants
+        // come from the lemma's paradigm when it is in the lexicon.
+        let norm = normalize(input.trim());
+        for exp in self.shortcuts.get(&norm) {
+            if !seen_lemmas.insert(normalize(&exp.lemma)) {
+                continue;
+            }
+            let variants = self
+                .forms_of_lemma(&exp.lemma)
+                .into_iter()
+                .filter(|form| *form != exp.form)
+                .collect();
+            groups.push(SuggestionGroup {
+                lemma: exp.lemma.clone(),
+                best: Suggestion {
+                    form: exp.form.clone(),
+                    lemma: exp.lemma.clone(),
+                    score: SHORTCUT_SCORE,
+                },
+                variants,
+            });
+            if groups.len() == limit {
+                return groups;
+            }
+        }
         for (score, id) in self.scored(input, context, limit) {
             let entry = self.lexicon.get(id);
             if !seen_lemmas.insert(normalize(&entry.lemma)) {
@@ -272,10 +351,18 @@ impl Engine {
             .collect()
     }
 
-    /// Records an accepted suggestion; future rankings adapt to the user.
+    /// Records a **confirmed** suggestion (picked and kept); future
+    /// rankings adapt toward this pair.
     pub fn accept(&mut self, input: &str, form: &str) {
         let input_skeleton = skeleton(&normalize(input.trim()));
-        self.history.accept(&input_skeleton, &normalize(form));
+        self.history.confirm(&input_skeleton, &normalize(form));
+    }
+
+    /// Records a **reverted** suggestion (undone/edited after insertion);
+    /// future rankings adapt away from this pair (the prior can go negative).
+    pub fn reject(&mut self, input: &str, form: &str) {
+        let input_skeleton = skeleton(&normalize(input.trim()));
+        self.history.reject(&input_skeleton, &normalize(form));
     }
 
     /// History blob for the shell to persist (privacy stays shell-side).
@@ -285,6 +372,12 @@ impl Engine {
 
     pub fn import_history(&mut self, tsv: &str) {
         self.history = UserHistory::from_tsv(tsv);
+    }
+
+    /// Merges another device's history blob into this one (sum of counters)
+    /// — the engine-side hook for cross-device sync.
+    pub fn merge_history(&mut self, tsv: &str) {
+        self.history.merge(&UserHistory::from_tsv(tsv));
     }
 
     /// Candidate generation: union of skeleton, completion, suffix and
@@ -448,6 +541,60 @@ mod tests {
         }
         // Hyphenated Russian words are still fair game.
         assert!(is_protected_safe("кто-то"));
+    }
+
+    #[test]
+    fn conventional_shortcuts_win_and_bypass_min_length() {
+        use crate::shortcuts::Shortcuts;
+        let mut e = engine();
+        e.set_shortcuts(Shortcuts::from_tsv_str("спс\tспасибо\nмб\tможет быть\n").unwrap());
+        // Exact shorthand is top-1, even though "мб" is below min_input_len.
+        assert_eq!(
+            top_forms(&e, "спс", 3).first().map(String::as_str),
+            Some("спасибо")
+        );
+        assert_eq!(top_forms(&e, "мб", 3), vec!["может быть"]);
+        // When a shortcut already fills the limit, the fuzzy path is
+        // skipped but the result is still exactly the shortcut.
+        assert_eq!(top_forms(&e, "спс", 1), vec!["спасибо"]);
+        // Non-shortcut input is unaffected.
+        assert_eq!(top_forms(&e, "првт", 1), vec!["привет"]);
+        // A grouped shortcut leads the strip.
+        let groups = e.suggest_grouped("спс", &Context::default(), 3);
+        assert_eq!(
+            groups.first().map(|g| g.best.form.as_str()),
+            Some("спасибо")
+        );
+        // limit 0 yields nothing on both APIs, even for a shortcut hit.
+        assert!(e.suggest("спс", &Context::default(), 0).is_empty());
+        assert!(e.suggest_grouped("спс", &Context::default(), 0).is_empty());
+    }
+
+    #[test]
+    fn preposition_picks_the_case() {
+        // `рбт` is case-ambiguous across работа's forms (all share skeleton
+        // рбт). Without context, frequency picks the nominative; a preposition
+        // pulls its governed case to the top.
+        let tsv = "работа\tработа\t500\tNOUN,inan,femn,sing,nomn\n\
+                   работе\tработа\t200\tNOUN,inan,femn,sing,loct\n\
+                   работу\tработа\t300\tNOUN,inan,femn,sing,accs\n\
+                   работы\tработа\t250\tNOUN,inan,femn,sing,gent\n";
+        let e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
+        let top = |ctx: &[&str]| {
+            e.suggest(
+                "рбт",
+                &Context::new(ctx.iter().map(|s| s.to_string()).collect()),
+                1,
+            )
+            .first()
+            .map(|s| s.form.clone())
+            .unwrap_or_default()
+        };
+        assert_eq!(top(&[]), "работа"); // frequency, nominative
+        // «в» governs loc/acc → работе or работу, never the nominative.
+        assert!(matches!(top(&["в"]).as_str(), "работе" | "работу"));
+        // «для» governs genitive → работы.
+        assert_eq!(top(&["для"]), "работы");
     }
 
     #[test]

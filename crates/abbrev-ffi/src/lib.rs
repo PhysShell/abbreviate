@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
 
 uniffi::setup_scaffolding!();
 
@@ -33,6 +33,7 @@ pub struct SuggestionGroup {
 pub enum AbbrevError {
     InvalidLexicon { message: String },
     InvalidLanguageModel { message: String },
+    InvalidShortcuts { message: String },
 }
 
 impl fmt::Display for AbbrevError {
@@ -42,6 +43,7 @@ impl fmt::Display for AbbrevError {
             Self::InvalidLanguageModel { message } => {
                 write!(f, "invalid language model: {message}")
             }
+            Self::InvalidShortcuts { message } => write!(f, "invalid shortcuts: {message}"),
         }
     }
 }
@@ -146,12 +148,42 @@ impl AbbrevEngine {
         Ok(())
     }
 
-    /// Records the suggestion the user accepted (local personalization).
+    /// Loads the conventional-shortcuts layer (`shorthand<TAB>form[<TAB>lemma]`).
+    pub fn load_shortcuts(&self, tsv: String) -> Result<(), AbbrevError> {
+        let shortcuts =
+            Shortcuts::from_tsv_str(&tsv).map_err(|e| AbbrevError::InvalidShortcuts {
+                message: e.to_string(),
+            })?;
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_shortcuts(shortcuts);
+        Ok(())
+    }
+
+    /// Records a confirmed suggestion (picked and kept).
     pub fn accept(&self, input: String, form: String) {
         self.inner
             .lock()
             .expect("engine mutex poisoned")
             .accept(&input, &form);
+    }
+
+    /// Records a reverted suggestion (undone/edited after insertion) —
+    /// negative signal; the pair's ranking prior can go negative.
+    pub fn reject(&self, input: String, form: String) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .reject(&input, &form);
+    }
+
+    /// Merges another device's history blob (sum of counters) for sync.
+    pub fn merge_history(&self, blob: String) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .merge_history(&blob);
     }
 
     /// Opaque history blob; the shell decides where (and whether) to store it.

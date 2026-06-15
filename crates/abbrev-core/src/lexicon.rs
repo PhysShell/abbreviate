@@ -15,6 +15,9 @@ pub struct LexiconEntry {
     pub lemma: String,
     /// Frequency prior, instructions-per-million or any monotone count.
     pub freq: f32,
+    /// Optional OpenCorpora-style grammeme tag (`NOUN,inan,femn,sing,loct`);
+    /// empty when the source lexicon has no morphology column.
+    pub tags: String,
 }
 
 /// Identifier of an entry inside a [`Lexicon`] (index into the entry list).
@@ -42,8 +45,9 @@ impl fmt::Display for LexiconError {
 impl std::error::Error for LexiconError {}
 
 impl Lexicon {
-    /// Parses the engine TSV format: `form<TAB>lemma<TAB>freq`.
-    /// Empty lines and lines starting with `#` are skipped.
+    /// Parses the engine TSV format: `form<TAB>lemma<TAB>freq[<TAB>tags]`.
+    /// The grammeme `tags` column is optional (3-column lexicons load with
+    /// empty tags). Empty lines and lines starting with `#` are skipped.
     pub fn from_tsv_str(tsv: &str) -> Result<Self, LexiconError> {
         let mut entries = Vec::new();
         for (i, raw) in tsv.lines().enumerate() {
@@ -61,8 +65,8 @@ impl Lexicon {
                     });
                 }
             };
-            // Fail fast on extra columns: they signal an incompatible
-            // artifact version or a broken generator, not optional data.
+            let tags = parts.next().unwrap_or("").trim().to_string();
+            // Fail fast on a 5th column: signals an incompatible artifact.
             if parts.next().is_some() {
                 return Err(LexiconError {
                     line: i + 1,
@@ -77,6 +81,7 @@ impl Lexicon {
                 form: form.trim().to_string(),
                 lemma: lemma.trim().to_string(),
                 freq,
+                tags,
             });
         }
         Ok(Self { entries })
@@ -124,8 +129,10 @@ mod tests {
     fn rejects_malformed_lines() {
         assert!(Lexicon::from_tsv_str("привет").is_err());
         assert!(Lexicon::from_tsv_str("привет\tпривет\tмного").is_err());
-        // Extra columns mean a broken or incompatible artifact.
-        assert!(Lexicon::from_tsv_str("привет\tпривет\t1.0\tлишнее").is_err());
+        // The 4th column is optional grammeme tags — allowed.
+        assert!(Lexicon::from_tsv_str("привет\tпривет\t1.0\tINTJ").is_ok());
+        // A 5th column means a broken or incompatible artifact.
+        assert!(Lexicon::from_tsv_str("привет\tпривет\t1.0\tINTJ\tлишнее").is_err());
     }
 
     #[test]

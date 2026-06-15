@@ -4,7 +4,7 @@
 //!
 //! Build: `wasm-pack build crates/abbrev-wasm --target web`.
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -101,8 +101,26 @@ impl WasmEngine {
         Ok(())
     }
 
+    /// Loads the conventional-shortcuts layer.
+    pub fn load_shortcuts(&mut self, tsv: &str) -> Result<(), JsError> {
+        let shortcuts = Shortcuts::from_tsv_str(tsv).map_err(|e| JsError::new(&e.to_string()))?;
+        self.inner.set_shortcuts(shortcuts);
+        Ok(())
+    }
+
+    /// Records a confirmed suggestion (picked and kept).
     pub fn accept(&mut self, input: &str, form: &str) {
         self.inner.accept(input, form);
+    }
+
+    /// Records a reverted suggestion (undone after insertion) — negative.
+    pub fn reject(&mut self, input: &str, form: &str) {
+        self.inner.reject(input, form);
+    }
+
+    /// Merges another device's history blob (sum of counters) for sync.
+    pub fn merge_history(&mut self, blob: &str) {
+        self.inner.merge_history(blob);
     }
 
     pub fn export_history(&self) -> String {

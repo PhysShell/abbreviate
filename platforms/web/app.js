@@ -6,7 +6,9 @@
 
 import init, { WasmEngine } from "./pkg/abbrev_wasm.js";
 
-const MIN_LEN = 3; // matches EngineConfig::min_input_len
+// 2, not 3: conventional shortcuts (мб, ща) are shorter than the fuzzy
+// minimum; the engine returns only exact shortcut matches below length 3.
+const MIN_LEN = 2;
 const HISTORY_KEY = "abbrev.history.tsv";
 const LOG_KEY = "abbrev.acceptlog.jsonl";
 
@@ -23,6 +25,10 @@ const els = {
 };
 
 let engine = null;
+// Last choice that can still be reverted with one tap. It is deliberately
+// not written to history until the user types on/leaves the page: a tap is
+// only confirmed once it is kept.
+let pendingUndo = null;
 
 async function fetchText(url) {
   const res = await fetch(url);
@@ -34,12 +40,14 @@ async function boot() {
   try {
     await init();
     els.status.textContent = "Загрузка словаря…";
-    const [lexicon, lm] = await Promise.all([
+    const [lexicon, lm, shortcuts] = await Promise.all([
       fetchText("./assets/lexicon.tsv"),
       fetchText("./assets/lm.tsv").catch(() => null),
+      fetchText("./assets/shortcuts.tsv").catch(() => null),
     ]);
     engine = new WasmEngine(lexicon);
     if (lm) engine.load_language_model(lm);
+    if (shortcuts) engine.load_shortcuts(shortcuts);
     const saved = localStorage.getItem(HISTORY_KEY);
     if (saved) engine.import_history(saved);
     els.status.textContent = lm
@@ -75,6 +83,13 @@ function render() {
   els.strip.innerHTML = "";
   if (!engine) return;
   const { word, context } = caretWord();
+  // Right after a choice the word is empty (caret sits past the inserted
+  // space): offer a one-tap undo. Tapping it is the reverted signal —
+  // confirmed != tapped, the whole point of the lifecycle.
+  if (word.length === 0 && pendingUndo) {
+    els.strip.appendChild(undoChip());
+    return;
+  }
   if (word.length < MIN_LEN) return;
   const ctx = els.context.checked ? context : "";
   let groups;
@@ -135,8 +150,26 @@ function closePopup() {
   document.getElementById("forms-popup")?.remove();
 }
 
-// Insert the chosen form, teach the engine, and log the acceptance locally.
+// A pending choice becomes confirmed only when it survives past the immediate
+// undo window. This keeps the core signal semantics honest: undoing a just-made
+// choice records `reverted`, not `confirmed + reverted`.
+function confirmPendingUndo() {
+  if (!pendingUndo) return;
+  const { shorthand, form, context, rank, fromHold } = pendingUndo;
+  if (els.learn.checked && engine) {
+    engine.accept(shorthand, form);
+    localStorage.setItem(HISTORY_KEY, engine.export_history());
+  }
+  if (els.log.checked) {
+    logEvent({ status: "confirmed", shorthand, form, context, rank, fromHold });
+  }
+  pendingUndo = null;
+}
+
+// Insert the chosen form and arm a one-tap undo; learning/logging are deferred
+// until the choice is actually kept.
 function choose(form, shorthand, context, rank, fromHold) {
+  confirmPendingUndo();
   closePopup();
   const { start, end } = caretWord();
   const text = els.editor.value;
@@ -145,26 +178,64 @@ function choose(form, shorthand, context, rank, fromHold) {
   els.editor.setSelectionRange(caret, caret);
   els.editor.focus();
 
-  if (els.learn.checked && engine) {
-    engine.accept(shorthand, form);
-    localStorage.setItem(HISTORY_KEY, engine.export_history());
-  }
-  // The acceptance log is a separate, explicit opt-in (off by default);
-  // disabling learning must never leave logging silently running.
-  if (els.log.checked) {
-    logAcceptance({ shorthand, form, context, rank, fromHold });
-  }
+  pendingUndo = {
+    shorthand,
+    form,
+    context,
+    rank,
+    fromHold,
+    start,
+    span: form.length + 1,
+  };
   render();
 }
 
-function logAcceptance(event) {
+function undoChip() {
+  const b = document.createElement("button");
+  b.className = "chip-main undo";
+  b.textContent = `↶ отменить «${pendingUndo.shorthand}»`;
+  b.title = "вернуть сокращение — это негативный сигнал (reverted)";
+  b.addEventListener("click", revertLast);
+  return b;
+}
+
+// Reverting a just-made choice: restore the shorthand and tell the engine
+// this pair was rejected (negative signal — its prior can go negative).
+function revertLast() {
+  if (!pendingUndo) return;
+  const { shorthand, form, start, span } = pendingUndo;
+  const text = els.editor.value;
+  els.editor.value = text.slice(0, start) + shorthand + text.slice(start + span);
+  const caret = start + shorthand.length;
+  els.editor.setSelectionRange(caret, caret);
+  els.editor.focus();
+
+  if (els.learn.checked && engine) {
+    engine.reject(shorthand, form); // reverted (negative signal)
+    localStorage.setItem(HISTORY_KEY, engine.export_history());
+  }
+  if (els.log.checked) {
+    logEvent({ status: "reverted", shorthand, form });
+  }
+  pendingUndo = null;
+  render();
+}
+
+function logEvent(event) {
   const line = JSON.stringify({ ts: Date.now(), ...event });
   const prev = localStorage.getItem(LOG_KEY) || "";
   localStorage.setItem(LOG_KEY, prev + line + "\n");
 }
 
-function download(name, text, type) {
-  const blob = new Blob([text], { type });
+function download(name, text, type, { bom = false } = {}) {
+  // Declare UTF-8 explicitly, and for human-inspected files prepend a BOM
+  // so editors/Excel don't misdetect Cyrillic as a legacy codepage (the
+  // ASCII-heavy JSONL log is otherwise guessed as cp1251 → mojibake). The
+  // history TSV gets no BOM: it is re-imported by the engine and a leading
+  // BOM would corrupt the first field.
+  const blob = new Blob([(bom ? "\uFEFF" : "") + text], {
+    type: `${type};charset=utf-8`,
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -173,19 +244,34 @@ function download(name, text, type) {
   URL.revokeObjectURL(url);
 }
 
-els.editor.addEventListener("input", render);
+els.editor.addEventListener("input", () => {
+  confirmPendingUndo(); // typing past the insertion confirms the choice
+  render();
+});
 els.editor.addEventListener("click", render);
 els.editor.addEventListener("keyup", (e) => {
   if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) render();
 });
 els.exportHistory.addEventListener("click", () =>
-  download("abbrev-history.tsv", localStorage.getItem(HISTORY_KEY) || "", "text/tab-separated-values"),
+  download(
+    "abbrev-history.tsv",
+    localStorage.getItem(HISTORY_KEY) || "",
+    "text/tab-separated-values",
+  ),
 );
 els.exportLog.addEventListener("click", () =>
-  download("abbrev-acceptlog.jsonl", localStorage.getItem(LOG_KEY) || "", "application/x-ndjson"),
+  download(
+    "abbrev-acceptlog.jsonl",
+    localStorage.getItem(LOG_KEY) || "",
+    "application/x-ndjson",
+    { bom: true },
+  ),
 );
+window.addEventListener("beforeunload", confirmPendingUndo);
+
 els.clear.addEventListener("click", () => {
   if (!confirm("Удалить локальную историю и лог принятий?")) return;
+  pendingUndo = null;
   localStorage.removeItem(HISTORY_KEY);
   localStorage.removeItem(LOG_KEY);
   if (engine) engine.import_history("");
