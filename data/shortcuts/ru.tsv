@@ -32,3 +32,19 @@
 дбро	доброе утро	доброе утро
 пжл	пожалуйста	пожалуйста
 збс	зашибись	зашибись
+
+# ultra-short (2–3 chars): below the fuzzy length threshold, so the engine
+# can only reach them through this exact-match layer. Keys are deliberately
+# non-words (checked against the lexicon) so they never shadow a real word
+# typed verbatim — keep-safety. lemma is the dictionary lemma where it has
+# one, so a future hold-popup can offer case forms.
+зн	знаю	знать
+гд	где	где
+ег	его	он
+тя	тебя	ты
+тбе	тебе	ты
+мну	меня	я
+кда	куда	куда
+пж	пожалуйста	пожалуйста
+пзж	позже	поздно
+нзн	не знаю	не знаю
