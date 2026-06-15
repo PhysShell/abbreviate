@@ -52,13 +52,22 @@ def main() -> int:
         return 1
     with probe:
         lemmas = set()
-        for raw in probe:
+        for line_no, raw in enumerate(probe, 1):
             line = raw.rstrip("\n")
             if not line or line.startswith("#"):
                 continue
             parts = line.split("\t")
-            if len(parts) >= 2 and parts[1]:
-                lemmas.add(parts[1])
+            # Enforce the engine's lexicon contract (see lexicon.rs): exactly
+            # form<TAB>lemma<TAB>freq, with an optional 4th grammeme column.
+            # Anything else is a drifted/broken artifact — fail fast like the
+            # engine does, rather than silently building paradigms from it.
+            if len(parts) not in (3, 4) or not parts[1]:
+                print(
+                    f"{src}:{line_no}: expected form<TAB>lemma<TAB>freq[<TAB>tags]",
+                    file=sys.stderr,
+                )
+                return 1
+            lemmas.add(parts[1])
 
     # Lazy import: usage and argument errors must not require the dependency.
     try:
@@ -107,7 +116,12 @@ def main() -> int:
         "# lemma<TAB>number<TAB>nomn|gent|datv|accs|ablt|loct  (empty = no form)\n"
     )
     # Atomic replace: a crash mid-write must not corrupt the artifact.
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(out) or ".", suffix=".tmp")
+    out_dir = os.path.dirname(out) or "."
+    try:
+        fd, tmp = tempfile.mkstemp(dir=out_dir, suffix=".tmp")
+    except OSError as e:
+        print(f"cannot create temp file in {out_dir}: {e}", file=sys.stderr)
+        return 1
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(header)
