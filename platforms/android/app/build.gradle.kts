@@ -46,3 +46,23 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     testImplementation("junit:junit:4.13.2")
 }
+
+// Bundle the real Russian data into assets at build time. Single source of
+// truth stays in /data (mirrors platforms/web/build.sh); the copies under
+// src/main/assets are git-ignored. aapt compresses them in the APK; the engine
+// loads them off the main thread at startup.
+val bundleEngineData by tasks.registering(Copy::class) {
+    description = "Copy the lexicon / LM / shortcuts from /data into assets."
+    val data = file("${rootProject.projectDir}/../../data")
+    val requiredLexicon = data.resolve("lexicons/ru-50k.tsv")
+    // Fail loudly rather than silently shipping the demo-only runtime path.
+    // (LM and shortcuts are optional; the lexicon is not.)
+    doFirst {
+        check(requiredLexicon.isFile) { "Missing required lexicon source: ${requiredLexicon.path}" }
+    }
+    from(requiredLexicon) { rename { "lexicon.tsv" } }
+    from(data.resolve("lm/ru-lm.tsv")) { rename { "lm.tsv" } }
+    from(data.resolve("shortcuts/ru.tsv")) { rename { "shortcuts.tsv" } }
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+tasks.named("preBuild") { dependsOn(bundleEngineData) }
