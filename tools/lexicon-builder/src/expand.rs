@@ -35,9 +35,9 @@ pub fn cmd_expand(args: Vec<String>) -> ExitCode {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "-o" | "--output" => output = it.next().cloned(),
-            "--ratio" => match it.next().and_then(|v| v.parse().ok()) {
-                Some(v) => ratio = v,
-                None => return fail("--ratio needs a number"),
+            "--ratio" => match it.next().and_then(|v| v.parse::<f64>().ok()) {
+                Some(v) if v.is_finite() && v > 0.0 => ratio = v,
+                _ => return fail("--ratio must be a finite positive number"),
             },
             other if lexicon.is_none() => lexicon = Some(other.to_string()),
             other if holdgroups.is_none() => holdgroups = Some(other.to_string()),
@@ -105,10 +105,14 @@ pub fn cmd_expand(args: Vec<String>) -> ExitCode {
         };
         let base = freqs.iter().cloned().fold(0.0_f64, f64::max);
         let lo = freqs.iter().cloned().fold(f64::INFINITY, f64::min);
-        // Below the least frequent real form so real forms keep their edge.
-        let fill = ((base * ratio).round() as i64)
-            .min((lo as i64 - 1).max(1))
-            .max(1);
+        // Strictly below the least frequent real form so real forms keep their
+        // edge. If that's impossible (lo <= 1) skip the lemma — a synthetic
+        // form must never tie, let alone beat, a real one on frequency.
+        let upper = lo as i64 - 1;
+        if upper < 1 {
+            continue;
+        }
+        let fill = ((base * ratio).round() as i64).clamp(1, upper);
         let is_adj = groups.iter().any(|(g, _)| g.starts_with("sing."));
         let mut seen: HashSet<String> = HashSet::new();
         for (group, cells) in groups {
