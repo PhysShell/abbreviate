@@ -84,6 +84,16 @@ def iter_texts(path, max_bytes):
                         yield TAG.sub(" ", h)
 
 
+def make_tokenizer():
+    """Return a tokenizer callable: razdel if installed, else a Cyrillic-word
+    regex fallback. razdel splits clitics/punctuation the regex would miss."""
+    try:
+        from razdel import tokenize as razdel_tok
+    except ModuleNotFoundError:
+        return lambda s: WORD.findall(s)
+    return lambda s: [t.text for t in razdel_tok(s)]
+
+
 def main():
     """Parse args, count token frequencies, and write the requested TSVs."""
     ap = argparse.ArgumentParser()
@@ -97,15 +107,7 @@ def main():
     if args.pairs and not args.lexicon:
         ap.error("--pairs requires --lexicon (skeleton match needs the lexicon)")
 
-    try:
-        from razdel import tokenize as razdel_tok
-
-        def toks(s):
-            return [t.text for t in razdel_tok(s)]
-    except ModuleNotFoundError:
-        def toks(s):
-            return WORD.findall(s)
-
+    toks = make_tokenizer()
     freq = {}
     n_tok = 0
     for blob in iter_texts(args.corpus, args.max_bytes):
