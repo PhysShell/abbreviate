@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>abbreviate — тест набора</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main>
+    <h1>abbreviate <small>тест набора</small></h1>
+    <p class="hint">
+      Наберите показанный текст на скорость. Таймер стартует с первого символа
+      и сам останавливается, когда ввод совпал с целью. Сравните режимы:
+      <b>обычно</b> (движок выключен) против <b>с подсказками</b>.
+      <a href="./index.html">← к демо</a>
+    </p>
+
+    <div id="status" class="status">Загрузка движка…</div>
+
+    <div class="test-modes">
+      <label><input type="radio" name="mode" value="off" checked /> обычно (без движка)</label>
+      <label><input type="radio" name="mode" value="on" /> с подсказками</label>
+      <button id="new-test" disabled>Новый текст</button>
+    </div>
+
+    <div id="target" class="test-target" aria-label="целевой текст"></div>
+
+    <div id="strip" class="strip" aria-label="подсказки"></div>
+    <textarea id="editor" rows="4" spellcheck="false" autocomplete="off"
+      placeholder="Нажмите «Новый текст», затем печатайте…" disabled></textarea>
+
+    <div id="countdown" class="test-countdown" hidden></div>
+
+    <div id="result" class="test-result" hidden></div>
+
+    <details class="settings" open>
+      <summary>Последние результаты</summary>
+      <table class="test-table">
+        <thead>
+          <tr><th>режим</th><th>время</th><th>CPM</th><th>WPM</th><th>нажатий</th><th>подсказок</th><th>% «верхняя»</th></tr>
+        </thead>
+        <tbody id="history"></tbody>
+      </table>
+      <p class="privacy">
+        «Нажатий» — события ввода + тапы по подсказкам (веб-приближение).
+        «% верхняя» — доля принятых подсказок, которые были первыми в списке.
+      </p>
+    </details>
+  </main>
+
+  <script type="module" src="./test.js"></script>
+</body>
+</html>
