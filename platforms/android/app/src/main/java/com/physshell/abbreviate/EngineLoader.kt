@@ -17,17 +17,23 @@ data class LoadedEngine(val port: UniffiSuggestionPort, val hasLm: Boolean, val 
 object EngineLoader {
     private const val TAG = "Abbrev"
 
+    // try/catch over Exception (not runCatching, which also swallows Errors like
+    // OutOfMemoryError) — only recoverable failures fall back to the demo.
     fun fromAssets(assets: AssetManager): LoadedEngine =
-        runCatching {
+        try {
             val lexicon = readAsset(assets, "lexicon.tsv") ?: error("lexicon.tsv not bundled")
             val lm = readAsset(assets, "lm.tsv")
             val shortcuts = readAsset(assets, "shortcuts.tsv")
             LoadedEngine(UniffiSuggestionPort.fromData(lexicon, lm, shortcuts), lm != null, false)
-        }.getOrElse {
-            Log.w(TAG, "real lexicon unavailable, falling back to demo", it)
+        } catch (e: Exception) {
+            Log.w(TAG, "real lexicon unavailable, falling back to demo", e)
             LoadedEngine(UniffiSuggestionPort.demo(), hasLm = false, isDemo = true)
         }
 
     private fun readAsset(assets: AssetManager, name: String): String? =
-        runCatching { assets.open(name).bufferedReader().use { it.readText() } }.getOrNull()
+        try {
+            assets.open(name).bufferedReader().use { it.readText() }
+        } catch (_: Exception) {
+            null
+        }
 }

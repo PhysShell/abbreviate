@@ -40,16 +40,25 @@ class AbbrevImeService : InputMethodService(), TextHost {
     // Set once the engine has loaded on the background thread.
     private var controller: SuggestionController? = null
 
+    @Volatile
+    private var destroyed = false
+
     override fun onCreate() {
         super.onCreate()
         // ~11 MB of TSV: parse + build the index off the main thread.
         thread(name = "abbrev-ime-load") {
             val loaded = EngineLoader.fromAssets(assets)
             main.post {
+                if (destroyed) return@post // load outlived the service
                 controller = SuggestionController(loaded.port)
                 refresh()
             }
         }
+    }
+
+    override fun onDestroy() {
+        destroyed = true
+        super.onDestroy()
     }
 
     override fun onCreateInputView(): View {
