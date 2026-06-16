@@ -164,7 +164,6 @@ function openForms(anchor, group, shorthand, context, focusFirst) {
   const pop = document.createElement("div");
   pop.className = "popup";
   pop.id = "forms-popup";
-  pop.tabIndex = -1;
 
   // Every selectable form, in DOM order, so the keyboard can walk a flat list
   // even when the popup is a 2-D declension grid.
@@ -307,6 +306,7 @@ function choose(form, shorthand, context, rank, fromHold) {
 function undoChip() {
   const b = document.createElement("button");
   b.className = "chip-main undo";
+  b.type = "button";
   b.textContent = `↶ отменить «${pendingUndo.shorthand}»`;
   b.title = "вернуть сокращение — это негативный сигнал (reverted)";
   b.addEventListener("click", revertLast);
