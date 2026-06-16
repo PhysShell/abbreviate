@@ -61,14 +61,24 @@ cargo run -p uniffi-bindgen -- generate \
 
 ## Лексикон
 
-Scratchpad стартует на встроенном demo-лексиконе (`UniffiSuggestionPort.demo()`)
-— достаточно проверить весь цикл без ассетов. Чтобы гонять реальный словарь,
-положи `ru-50k.tsv` в `app/src/main/assets/` и собери движок из него:
+Scratchpad грузит **реальные данные** из `/data` — единый источник для всех
+платформ. Gradle-таск `bundleEngineData` копирует их в `app/src/main/assets/`
+при сборке (как `platforms/web/build.sh` для веба; копии в `.gitignore`):
 
-```kotlin
-val tsv = assets.open("ru-50k.tsv").bufferedReader().readText()
-UniffiSuggestionPort(AbbrevEngine.fromLexiconTsv(tsv))
-```
+| из `/data`                | → asset         | роль                                   |
+|---------------------------|-----------------|----------------------------------------|
+| `lexicons/ru-50k.tsv`     | `lexicon.tsv`   | словарь (обязательно)                  |
+| `lm/ru-lm.tsv`            | `lm.tsv`        | биграммная LM — контекст-ранжирование  |
+| `shortcuts/ru.tsv`        | `shortcuts.tsv` | договорные сокращения (мб, ща)         |
+
+`UniffiSuggestionPort.fromData(lexicon, lm, shortcuts)` поднимает движок; в
+`ScratchpadActivity` это делается **в фоновом потоке** со статус-строкой
+(≈11 МБ TSV на главном потоке = ANR). Если ассетов нет — фолбэк на
+`UniffiSuggestionPort.demo()` (встроенный мини-словарь), чтобы приложение всегда
+запускалось.
+
+Данные раздувают debug-APK на несколько МБ (TSV хорошо жмётся в aapt) — для
+спайка ок; для реального продукта стоит подумать про bin-формат/стрим-загрузку.
 
 ## Дальше: IME / accessibility
 

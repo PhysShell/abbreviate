@@ -25,12 +25,26 @@ class UniffiSuggestionPort(private val engine: AbbrevEngine) : SuggestionPort {
 
     companion object {
         /**
-         * Engine over the tiny built-in demo lexicon — enough to exercise the
-         * full on-device loop (binding loads, suggestions render, text is
-         * replaced) without bundling a lexicon asset. Swap for
-         * `AbbrevEngine.fromLexiconTsv(assets.open("ru-50k.tsv")...)` to test
-         * against the real lexicon.
+         * Engine over the tiny built-in demo lexicon — a fallback that exercises
+         * the loop without any asset. The real app loads [fromData].
          */
         fun demo(): UniffiSuggestionPort = UniffiSuggestionPort(AbbrevEngine.withDemoLexicon())
+
+        /**
+         * Engine over the real bundled data: the lexicon TSV plus the optional
+         * bigram language model (context ranking) and conventional shortcuts.
+         * Takes plain strings, so the port stays Android-free — the host reads
+         * the assets. Throws if [lexiconTsv] is malformed.
+         */
+        fun fromData(
+            lexiconTsv: String,
+            lmTsv: String? = null,
+            shortcutsTsv: String? = null,
+        ): UniffiSuggestionPort {
+            val engine = AbbrevEngine.fromLexiconTsv(lexiconTsv)
+            lmTsv?.let { engine.loadLanguageModel(it) }
+            shortcutsTsv?.let { engine.loadShortcuts(it) }
+            return UniffiSuggestionPort(engine)
+        }
     }
 }

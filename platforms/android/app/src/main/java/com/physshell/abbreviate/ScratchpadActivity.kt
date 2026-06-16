@@ -26,6 +26,7 @@ import com.physshell.abbreviate.controller.StripState
 import com.physshell.abbreviate.controller.SuggestionController
 import com.physshell.abbreviate.engine.UniffiSuggestionPort
 import com.physshell.abbreviate.host.TextHost
+import kotlin.concurrent.thread
 
 /**
  * A minimal on-device scratchpad: type abbreviations into the field, the strip
@@ -36,12 +37,18 @@ import com.physshell.abbreviate.host.TextHost
  * IME/accessibility shells; only the [TextHost] below is shell-specific.
  *
  * The look deliberately mirrors the web demo (`platforms/web`): dark panel,
- * accent-coloured top suggestion, numbered chips.
+ * accent-coloured top suggestion, numbered chips. The real ru-50k lexicon, the
+ * bigram LM and the shortcuts are bundled as assets and loaded off the main
+ * thread (≈11 MB of TSV would ANR on the UI thread).
  */
 class ScratchpadActivity : Activity(), TextHost {
 
     private lateinit var editor: EditText
     private lateinit var strip: LinearLayout
+    private lateinit var status: TextView
+
+    // Set once the engine has finished loading on the background thread; until
+    // then the editor is disabled, so nothing can call into it.
     private lateinit var controller: SuggestionController
 
     // Guards the TextWatcher against the programmatic edit made by an insertion.
@@ -49,7 +56,6 @@ class ScratchpadActivity : Activity(), TextHost {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        controller = SuggestionController(UniffiSuggestionPort.demo())
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -59,14 +65,14 @@ class ScratchpadActivity : Activity(), TextHost {
 
         root.addView(title())
         root.addView(hint())
-        root.addView(
-            TextView(this).apply {
-                text = "Готово — встроенный демо-словарь загружен."
-                setTextColor(MUTED)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                setPadding(0, dp(4), 0, dp(8))
-            },
-        )
+
+        status = TextView(this).apply {
+            text = "Загрузка словаря…"
+            setTextColor(MUTED)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(0, dp(4), 0, dp(8))
+        }
+        root.addView(status)
 
         strip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -90,21 +96,58 @@ class ScratchpadActivity : Activity(), TextHost {
             setHintTextColor(MUTED)
             background = panel(BORDER)
             setPadding(dp(14), dp(12), dp(14), dp(12))
+            isEnabled = false // re-enabled once the engine is ready
             // Accent focus ring, like `#editor:focus` on the web.
             setOnFocusChangeListener { _, focused -> background = panel(if (focused) ACCENT else BORDER) }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    if (!applying) render(controller.refresh(textBeforeCursor()))
+                    if (!applying && ::controller.isInitialized) render(controller.refresh(textBeforeCursor()))
                 }
             })
         }
         root.addView(editor, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         setContentView(root)
-        editor.requestFocus()
+        loadEngine()
     }
+
+    /**
+     * Build the engine from the bundled assets on a background thread, then
+     * hand control back to the UI. Falls back to the demo lexicon if the assets
+     * are missing or unreadable, so the scratchpad is always usable.
+     */
+    private fun loadEngine() = thread(name = "abbrev-load") {
+        val result = runCatching {
+            val lexicon = readAsset("lexicon.tsv") ?: error("lexicon.tsv not bundled")
+            val lm = readAsset("lm.tsv")
+            val shortcuts = readAsset("shortcuts.tsv")
+            Triple(UniffiSuggestionPort.fromData(lexicon, lm, shortcuts), lm != null, false)
+        }.recoverCatching {
+            Log.w(TAG, "real lexicon unavailable, falling back to demo", it)
+            Triple(UniffiSuggestionPort.demo(), false, true)
+        }
+
+        runOnUiThread {
+            result.onSuccess { (port, hasLm, isDemo) ->
+                controller = SuggestionController(port)
+                editor.isEnabled = true
+                editor.requestFocus()
+                status.text = when {
+                    isDemo -> "Демо-словарь (реальный не найден в ассетах)."
+                    hasLm -> "Готово — словарь и языковая модель загружены."
+                    else -> "Готово — словарь загружен (без LM)."
+                }
+            }.onFailure {
+                status.text = "Ошибка загрузки словаря: ${it.message}"
+                status.setTextColor(DANGER)
+            }
+        }
+    }
+
+    private fun readAsset(name: String): String? =
+        runCatching { assets.open(name).bufferedReader().use { it.readText() } }.getOrNull()
 
     // --- TextHost: the only shell-specific text plumbing -------------------
 
@@ -220,7 +263,7 @@ class ScratchpadActivity : Activity(), TextHost {
     // tap-driven; this mirrors the digit/arrow selection the web demo and the
     // eventual IME shell use.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (controller.state.isEmpty) return super.onKeyDown(keyCode, event)
+        if (!::controller.isInitialized || controller.state.isEmpty) return super.onKeyDown(keyCode, event)
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> render(controller.moveSelection(-1))
             KeyEvent.KEYCODE_DPAD_RIGHT -> render(controller.moveSelection(1))
@@ -269,5 +312,6 @@ class ScratchpadActivity : Activity(), TextHost {
         private val ACCENT = Color.parseColor("#6EA8FE")
         private val BORDER = Color.parseColor("#2C303A")
         private val HOVER = Color.parseColor("#272B34")
+        private val DANGER = Color.parseColor("#E06C75")
     }
 }
