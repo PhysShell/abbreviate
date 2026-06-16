@@ -27,6 +27,21 @@ android {
         jvmTarget = "17"
     }
 
+    // Sign debug builds with a committed, fixed debug keystore (not the
+    // per-machine auto-generated one). Without this, every CI run signs with a
+    // different ephemeral key, so reinstalling a newer APK over an older one
+    // fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE and forces an uninstall.
+    // This is the conventional throwaway debug key (password "android") — safe
+    // to commit; it never signs a release build.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     // Hand-written shell under src/main/java; the UniFFI-generated binding is
     // dropped into src/uniffi/kotlin by `gen-bindings.sh` (git-ignored), and the
     // engine .so into src/main/jniLibs by cargo-ndk (git-ignored).
@@ -36,6 +51,7 @@ android {
     buildTypes {
         getByName("debug") {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
