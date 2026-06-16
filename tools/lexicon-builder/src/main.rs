@@ -18,6 +18,7 @@
 //! ```
 
 mod bigrams;
+mod expand;
 mod rnc;
 
 use std::collections::HashMap;
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
         Some("bigrams") => return bigrams::cmd_bigrams(args.split_off(1)),
         Some("rnc") => return rnc::cmd_rnc(args.split_off(1)),
         Some("calibrate") => return rnc::cmd_calibrate(args.split_off(1)),
+        Some("expand") => return expand::cmd_expand(args.split_off(1)),
         _ => {}
     }
     let mut input: Option<String> = None;
