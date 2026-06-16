@@ -206,3 +206,58 @@ proptest! {
         }
     }
 }
+
+// ---- Engine: suggestion invariants (the snapshot's independent oracle) -----
+//
+// These hold regardless of ranking coefficients, so they cross-check any
+// future variant (e.g. ending-aware re-inflection) without trusting the
+// golden snapshot: determinism makes the snapshot reproducible, and "every
+// surfaced form is real" guards against synthesizing a form that is not an
+// actual inflection. When re-inflection lands, extend `known` with the
+// lemma's paradigm cells.
+
+proptest! {
+    #[test]
+    fn suggestions_are_deterministic_real_and_ranked(
+        input in "[а-яё-]{0,16}",
+        prev in "[а-яё ]{0,16}",
+        limit in 0usize..8,
+    ) {
+        let engine = Engine::new(Lexicon::demo());
+        let known: HashSet<String> = engine
+            .lexicon()
+            .iter()
+            .map(|(_, e)| normalize(&e.form))
+            .collect();
+        let ctx = Context::new(prev.split_whitespace().map(String::from).collect());
+
+        let first = engine.suggest_grouped(&input, &ctx, limit);
+        let again = engine.suggest_grouped(&input, &ctx, limit);
+
+        // Determinism: identical results run-to-run — the property that lets a
+        // golden snapshot be a trustworthy oracle in the first place.
+        prop_assert_eq!(first.len(), again.len(), "non-deterministic group count");
+
+        let mut prev_score = f32::INFINITY;
+        for (a, b) in first.iter().zip(&again) {
+            prop_assert_eq!(&a.best.form, &b.best.form, "non-deterministic form");
+            prop_assert!((a.best.score - b.best.score).abs() < f32::EPSILON);
+
+            // Finite scores, non-increasing across the strip.
+            prop_assert!(a.best.score.is_finite(), "non-finite score");
+            prop_assert!(a.best.score <= prev_score, "strip not sorted by score");
+            prev_score = a.best.score;
+
+            // No hallucinations: best form and every hold-variant are real
+            // forms the lexicon actually carries.
+            prop_assert!(
+                known.contains(&normalize(&a.best.form)),
+                "surfaced unknown form: {}",
+                a.best.form
+            );
+            for v in &a.variants {
+                prop_assert!(known.contains(&normalize(v)), "unknown variant: {v}");
+            }
+        }
+    }
+}
