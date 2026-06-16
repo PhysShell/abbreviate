@@ -1,6 +1,7 @@
 package com.physshell.abbreviate
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -72,6 +73,15 @@ class ScratchpadActivity : Activity(), TextHost {
             setPadding(0, dp(4), 0, dp(8))
         }
         root.addView(status)
+
+        root.addView(
+            android.widget.Button(this).apply {
+                text = "→ Тест набора на скорость"
+                isAllCaps = false
+                setOnClickListener { startActivity(Intent(this@ScratchpadActivity, TestActivity::class.java)) }
+            },
+            LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(8) },
+        )
 
         strip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
