@@ -24,7 +24,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.physshell.abbreviate.controller.StripState
 import com.physshell.abbreviate.controller.SuggestionController
-import com.physshell.abbreviate.engine.UniffiSuggestionPort
 import com.physshell.abbreviate.host.TextHost
 import kotlin.concurrent.thread
 
@@ -114,41 +113,23 @@ class ScratchpadActivity : Activity(), TextHost {
     }
 
     /**
-     * Build the engine from the bundled assets on a background thread, then
-     * hand control back to the UI. Falls back to the demo lexicon if the assets
-     * are missing or unreadable, so the scratchpad is always usable.
+     * Build the engine from the bundled assets on a background thread (see
+     * [EngineLoader]), then hand control back to the UI.
      */
     private fun loadEngine() = thread(name = "abbrev-load") {
-        val result = runCatching {
-            val lexicon = readAsset("lexicon.tsv") ?: error("lexicon.tsv not bundled")
-            val lm = readAsset("lm.tsv")
-            val shortcuts = readAsset("shortcuts.tsv")
-            Triple(UniffiSuggestionPort.fromData(lexicon, lm, shortcuts), lm != null, false)
-        }.recoverCatching {
-            Log.w(TAG, "real lexicon unavailable, falling back to demo", it)
-            Triple(UniffiSuggestionPort.demo(), false, true)
-        }
-
+        val loaded = EngineLoader.fromAssets(assets)
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread // load outlived the Activity
-            result.onSuccess { (port, hasLm, isDemo) ->
-                controller = SuggestionController(port)
-                editor.isEnabled = true
-                editor.requestFocus()
-                status.text = when {
-                    isDemo -> "Демо-словарь (реальный не найден в ассетах)."
-                    hasLm -> "Готово — словарь и языковая модель загружены."
-                    else -> "Готово — словарь загружен (без LM)."
-                }
-            }.onFailure {
-                status.text = "Ошибка загрузки словаря: ${it.message}"
-                status.setTextColor(DANGER)
+            controller = SuggestionController(loaded.port)
+            editor.isEnabled = true
+            editor.requestFocus()
+            status.text = when {
+                loaded.isDemo -> "Демо-словарь (реальный не найден в ассетах)."
+                loaded.hasLm -> "Готово — словарь и языковая модель загружены."
+                else -> "Готово — словарь загружен (без LM)."
             }
         }
     }
-
-    private fun readAsset(name: String): String? =
-        runCatching { assets.open(name).bufferedReader().use { it.readText() } }.getOrNull()
 
     // --- TextHost: the only shell-specific text plumbing -------------------
 
@@ -313,6 +294,5 @@ class ScratchpadActivity : Activity(), TextHost {
         private val ACCENT = Color.parseColor("#6EA8FE")
         private val BORDER = Color.parseColor("#2C303A")
         private val HOVER = Color.parseColor("#272B34")
-        private val DANGER = Color.parseColor("#E06C75")
     }
 }
