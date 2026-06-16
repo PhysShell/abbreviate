@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_label">Abbrev (аббревиатурная клавиатура)</string>
+    <string name="ime_subtype_label">Русский — аббревиатуры</string>
+</resources>

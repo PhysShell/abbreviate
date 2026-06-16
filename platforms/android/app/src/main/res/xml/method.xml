@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- IME metadata (referenced from the <service> meta-data android.view.im). -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.physshell.abbreviate.ScratchpadActivity">
+    <subtype
+        android:label="@string/ime_subtype_label"
+        android:imeSubtypeLocale="ru"
+        android:imeSubtypeMode="keyboard" />
+</input-method>
