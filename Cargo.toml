@@ -6,6 +6,7 @@ members = [
     "crates/abbrev-ffi",
     "crates/abbrev-wasm",
     "tools/lexicon-builder",
+    "tools/uniffi-bindgen",
 ]
 
 [workspace.package]
