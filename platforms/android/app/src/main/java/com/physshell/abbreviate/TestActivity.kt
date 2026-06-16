@@ -149,6 +149,8 @@ class TestActivity : Activity() {
     }
 
     private fun newTest() {
+        main.removeCallbacksAndMessages(null) // cancel any in-flight countdown
+        countdown.visibility = TextView.GONE
         targetText = TARGETS.random()
         edits = 0
         running = false
