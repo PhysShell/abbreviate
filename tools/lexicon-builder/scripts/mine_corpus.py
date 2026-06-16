@@ -31,23 +31,21 @@ import re
 import sys
 
 VOWELS = set("аеёиоуыэюя")
+SIGNS = set("ьъ")
 TAG = re.compile(r"<[^>]+>")
 # Cyrillic word tokens (hyphen allowed inside), everything else is a separator.
 WORD = re.compile(r"[а-яёА-ЯЁ]+(?:-[а-яёА-ЯЁ]+)*")
 
 
 def normalize(w):
+    """Lowercase and fold `ё→е`, matching the engine's alphabet normalization."""
     return w.lower().replace("ё", "е")
 
 
 def skeleton(w):
-    """Consonant skeleton: drop vowels but keep a leading vowel as an anchor,
-    mirroring how the engine reaches `знаю` from `зн`."""
-    if not w:
-        return ""
-    head = w[0]
-    rest = [c for c in w[1:] if c not in VOWELS]
-    return (head if head in VOWELS else head) + "".join(rest)
+    """Consonant skeleton, matching `abbrev_core::alphabet::skeleton`: drop all
+    vowels and the soft/hard signs `ь`/`ъ` (`семья → см`, `знаю → зн`)."""
+    return "".join(c for c in w if c not in VOWELS and c not in SIGNS)
 
 
 def iter_texts(path, max_bytes):
@@ -65,7 +63,7 @@ def iter_texts(path, max_bytes):
         buf = b""
         try:
             buf = reader.read(max_bytes)
-        except Exception:
+        except zstd.ZstdError:
             pass  # truncated tail from a ranged slice — keep what decoded
     for line in buf.decode("utf-8", "ignore").split("\n"):
         line = line.strip()
@@ -87,6 +85,7 @@ def iter_texts(path, max_bytes):
 
 
 def main():
+    """Parse args, count token frequencies, and write the requested TSVs."""
     ap = argparse.ArgumentParser()
     ap.add_argument("corpus")
     ap.add_argument("--lexicon")
@@ -95,6 +94,8 @@ def main():
     ap.add_argument("--max-bytes", type=int, default=400_000_000)
     ap.add_argument("--min-count", type=int, default=2)
     args = ap.parse_args()
+    if args.pairs and not args.lexicon:
+        ap.error("--pairs requires --lexicon (skeleton match needs the lexicon)")
 
     try:
         from razdel import tokenize as razdel_tok
@@ -124,7 +125,7 @@ def main():
                 if c >= args.min_count:
                     f.write(f"{w}\t{c}\n")
 
-    if args.pairs and args.lexicon:
+    if args.pairs:  # --lexicon is guaranteed present (validated above)
         # skeleton -> (best lexicon word, its freq). Most frequent word wins.
         lex = {}
         skel = {}
