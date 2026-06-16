@@ -30,6 +30,11 @@ class SuggestionController(
     private val port: SuggestionPort,
     private val limit: Int = 5,
 ) {
+    init {
+        // A non-positive limit would wrap to a huge UInt at the FFI boundary.
+        require(limit > 0) { "limit must be > 0, was $limit" }
+    }
+
     var state: StripState = EMPTY
         private set
 
@@ -70,6 +75,15 @@ class SuggestionController(
     fun accept(host: TextHost, index: Int = state.selected): String? {
         val item = state.items.getOrNull(index) ?: return null
         val token = state.token
+        // The strip may be stale: the caret can move (without a text edit)
+        // between refresh and accept. Re-read the live text and bail — by
+        // recomputing — if the token no longer ends at the caret, so we never
+        // replace an unrelated span.
+        val before = host.textBeforeCursor()
+        if (!before.endsWith(token)) {
+            refresh(before)
+            return null
+        }
         host.replaceTokenAtCursor(token, item.form)
         port.accept(token, item.form)
         state = EMPTY

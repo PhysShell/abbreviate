@@ -90,10 +90,16 @@ class ScratchpadActivity : Activity(), TextHost {
     override fun replaceTokenAtCursor(token: String, replacement: String) {
         val caret = editor.selectionStart.coerceIn(0, editor.text.length)
         val start = (caret - token.length).coerceAtLeast(0)
+        // Defensive: only replace if the span really is the token (the
+        // controller guards too, but the field can shift under us).
+        if (editor.text.substring(start, caret) != token) return
         applying = true
-        editor.text.replace(start, caret, replacement)
-        editor.setSelection(start + replacement.length)
-        applying = false
+        try {
+            editor.text.replace(start, caret, replacement)
+            editor.setSelection(start + replacement.length)
+        } finally {
+            applying = false
+        }
     }
 
     // --- Strip rendering + selection --------------------------------------

@@ -94,6 +94,31 @@ class SuggestionControllerTest {
     }
 
     @Test
+    fun accept_rejects_stale_state_when_caret_no_longer_ends_with_token() {
+        val port = FakePort(listOf(cand("привет")))
+        val host = FakeHost().apply { before = "првт" }
+        val c = SuggestionController(port)
+        c.refresh(host.before) // token = "првт"
+
+        // Caret moved on (no edit to the token): the live text no longer ends
+        // with the token, so accept must replace nothing and recompute.
+        host.before = "првт зашёл "
+        assertNull(c.accept(host))
+        assertTrue("no replacement on stale state", host.replacements.isEmpty())
+        assertTrue("strip recomputed (now empty)", c.state.isEmpty)
+    }
+
+    @Test
+    fun rejects_non_positive_limit() {
+        val port = FakePort(emptyList())
+        try {
+            SuggestionController(port, limit = 0)
+            throw AssertionError("expected IllegalArgumentException")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    @Test
     fun accept_with_no_suggestions_is_a_noop() {
         val host = FakeHost()
         val c = SuggestionController(FakePort(emptyList()))

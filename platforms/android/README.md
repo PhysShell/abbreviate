@@ -10,7 +10,7 @@ Kotlin только читает текст, показывает подсказ
 
 ## Архитектура (шов host ↔ движок)
 
-```
+```text
 ScratchpadActivity ──implements── TextHost            (shell-specific, ~70 строк)
         │                            ▲
         │ refresh / accept           │ replaceTokenAtCursor / textBeforeCursor
