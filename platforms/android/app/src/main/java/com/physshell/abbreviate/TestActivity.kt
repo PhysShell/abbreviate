@@ -143,6 +143,11 @@ class TestActivity : Activity() {
         renderTarget("")
     }
 
+    override fun onDestroy() {
+        main.removeCallbacksAndMessages(null) // drop pending countdown ticks
+        super.onDestroy()
+    }
+
     private fun newTest() {
         targetText = TARGETS.random()
         edits = 0
@@ -179,7 +184,9 @@ class TestActivity : Activity() {
             startedAt = System.nanoTime()
         }
         edits++
-        renderTarget(editor.text.toString())
+        // Highlight against the same normalization the finish check uses, so the
+        // green prefix and the auto-stop agree (extra spaces / mixed case).
+        renderTarget(norm(editor.text.toString()))
         if (norm(editor.text.toString()) == norm(targetText)) finish_()
     }
 
