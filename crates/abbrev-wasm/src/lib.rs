@@ -4,7 +4,10 @@
 //!
 //! Build: `wasm-pack build crates/abbrev-wasm --target web`.
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
+use abbrev_core::morph::Case;
+use abbrev_core::{
+    BigramModel, Context, Engine, Gender, Lexicon, Number, ParadigmGroup, Paradigms, Shortcuts,
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -20,6 +23,57 @@ struct JsSuggestionGroup<'a> {
     lemma: &'a str,
     best: JsSuggestion<'a>,
     variants: &'a [String],
+}
+
+#[derive(Serialize)]
+struct JsParadigmGroup<'a> {
+    /// Number label, ready to render: "ед." / "мн.".
+    number: &'static str,
+    /// Gender label for an adjectival singular ("м. р." / "ж. р." / "с. р."),
+    /// or `null` for nouns and plurals. Serialized as JSON `null` so the web
+    /// can append it to the group heading only when present.
+    gender: Option<&'static str>,
+    forms: Vec<JsCaseForm<'a>>,
+}
+
+#[derive(Serialize)]
+struct JsCaseForm<'a> {
+    /// Russian case abbreviation, ready to render: "им.", "род.", …
+    case: &'static str,
+    form: &'a str,
+}
+
+fn js_group(g: &ParadigmGroup) -> JsParadigmGroup<'_> {
+    JsParadigmGroup {
+        number: match g.number {
+            Number::Singular => "ед.",
+            Number::Plural => "мн.",
+        },
+        gender: g.gender.map(|gender| match gender {
+            Gender::Masculine => "м. р.",
+            Gender::Feminine => "ж. р.",
+            Gender::Neuter => "с. р.",
+        }),
+        forms: g
+            .forms
+            .iter()
+            .map(|cf| JsCaseForm {
+                case: case_label(cf.case),
+                form: &cf.form,
+            })
+            .collect(),
+    }
+}
+
+fn case_label(case: Case) -> &'static str {
+    match case {
+        Case::Nom => "им.",
+        Case::Gen => "род.",
+        Case::Dat => "дат.",
+        Case::Acc => "вин.",
+        Case::Ins => "тв.",
+        Case::Loc => "пр.",
+    }
 }
 
 #[wasm_bindgen]
@@ -88,10 +142,31 @@ impl WasmEngine {
         serde_json::to_string(&view).unwrap_or_else(|_| "[]".to_string())
     }
 
-    /// Inflected forms of a lemma as a JSON array of strings.
+    /// Inflected forms of a lemma as a JSON array of strings (ordered by the
+    /// loaded paradigm when available, else by frequency).
     pub fn forms_of_lemma_json(&self, lemma: &str) -> String {
         serde_json::to_string(&self.inner.forms_of_lemma(lemma))
             .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Loads build-time declension paradigms (`ru-hold-groups.tsv`) for
+    /// grouped hold-popups. Parsing is lenient, so this is infallible.
+    pub fn load_paradigms(&mut self, tsv: &str) {
+        self.inner.set_paradigms(Paradigms::from_tsv_str(tsv));
+    }
+
+    /// Declension of a lemma as JSON:
+    /// `[{number, gender, forms: [{case, form}]}]`, singular first and
+    /// case-ordered, with display-ready Russian labels (`gender` is `null`
+    /// for nouns and plurals). Returns `[]` when no paradigm is loaded for
+    /// the lemma — the caller then falls back to `forms_of_lemma_json`.
+    pub fn paradigm_of_lemma_json(&self, lemma: &str) -> String {
+        let view: Vec<JsParadigmGroup<'_>> = self
+            .inner
+            .paradigm_of_lemma(lemma)
+            .map(|groups| groups.iter().map(js_group).collect())
+            .unwrap_or_default();
+        serde_json::to_string(&view).unwrap_or_else(|_| "[]".to_string())
     }
 
     /// Plugs in a bigram language model (`#abbrev-lm v1` TSV artifact).
@@ -141,5 +216,33 @@ mod tests {
         let engine = WasmEngine::new(None).unwrap();
         let json = engine.suggest_json("првт", "", 3);
         assert!(json.contains("привет"), "{json}");
+    }
+
+    #[test]
+    fn paradigm_json_surface() {
+        let mut engine = WasmEngine::new(None).unwrap();
+        engine.load_paradigms("работа\tsing\tработа|работы|работе|работу|работой|работе\n");
+        let json = engine.paradigm_of_lemma_json("работа");
+        assert!(
+            json.contains("\"им.\"") && json.contains("работе"),
+            "{json}"
+        );
+        // A noun group has no gender label (JSON null).
+        assert!(json.contains("\"gender\":null"), "{json}");
+        // Unknown lemma → empty array so the caller falls back to flat forms.
+        assert_eq!(engine.paradigm_of_lemma_json("несуществующее"), "[]");
+    }
+
+    #[test]
+    fn paradigm_json_adjective_labels_gender() {
+        let mut engine = WasmEngine::new(None).unwrap();
+        engine.load_paradigms(
+            "красный\tsing.masc\tкрасный|красного|красному|красный|красным|красном\n",
+        );
+        let json = engine.paradigm_of_lemma_json("красный");
+        assert!(
+            json.contains("\"ед.\"") && json.contains("\"м. р.\""),
+            "{json}"
+        );
     }
 }

@@ -8,7 +8,8 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts};
+use abbrev_core::morph::Case;
+use abbrev_core::{BigramModel, Context, Engine, Gender, Lexicon, Number, Paradigms, Shortcuts};
 
 uniffi::setup_scaffolding!();
 
@@ -27,6 +28,84 @@ pub struct SuggestionGroup {
     pub lemma: String,
     pub best: Suggestion,
     pub variants: Vec<String>,
+}
+
+/// Grammatical number of a declension group.
+#[derive(uniffi::Enum)]
+pub enum GrammaticalNumber {
+    Singular,
+    Plural,
+}
+
+/// Grammatical gender of a declension group. Present only on an adjective's
+/// singular groups; `None` for nouns and any plural.
+#[derive(uniffi::Enum)]
+pub enum GrammaticalGender {
+    Masculine,
+    Feminine,
+    Neuter,
+}
+
+/// Russian grammatical case (the six declension cases).
+#[derive(uniffi::Enum)]
+pub enum GrammaticalCase {
+    Nominative,
+    Genitive,
+    Dative,
+    Accusative,
+    Instrumental,
+    Locative,
+}
+
+/// One declension cell: a case and the surface form filling it.
+#[derive(uniffi::Record)]
+pub struct CaseForm {
+    pub case: GrammaticalCase,
+    pub form: String,
+}
+
+/// A lemma's declension for one number (and, for adjectives, gender),
+/// case-ordered — backs a grouped hold-popup (singular first; within the
+/// singular, masculine → feminine → neuter).
+#[derive(uniffi::Record)]
+pub struct ParadigmGroup {
+    pub number: GrammaticalNumber,
+    /// Gender of an adjectival singular group; `None` for nouns and plurals.
+    pub gender: Option<GrammaticalGender>,
+    pub forms: Vec<CaseForm>,
+}
+
+fn to_ffi_group(group: &abbrev_core::ParadigmGroup) -> ParadigmGroup {
+    ParadigmGroup {
+        number: match group.number {
+            Number::Singular => GrammaticalNumber::Singular,
+            Number::Plural => GrammaticalNumber::Plural,
+        },
+        gender: group.gender.map(|g| match g {
+            Gender::Masculine => GrammaticalGender::Masculine,
+            Gender::Feminine => GrammaticalGender::Feminine,
+            Gender::Neuter => GrammaticalGender::Neuter,
+        }),
+        forms: group
+            .forms
+            .iter()
+            .map(|cf| CaseForm {
+                case: to_ffi_case(cf.case),
+                form: cf.form.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn to_ffi_case(case: Case) -> GrammaticalCase {
+    match case {
+        Case::Nom => GrammaticalCase::Nominative,
+        Case::Gen => GrammaticalCase::Genitive,
+        Case::Dat => GrammaticalCase::Dative,
+        Case::Acc => GrammaticalCase::Accusative,
+        Case::Ins => GrammaticalCase::Instrumental,
+        Case::Loc => GrammaticalCase::Locative,
+    }
 }
 
 #[derive(Debug, uniffi::Error)]
@@ -126,12 +205,35 @@ impl AbbrevEngine {
             .collect()
     }
 
-    /// Inflected forms of a lemma for the "hold for forms" UI.
+    /// Inflected forms of a lemma for the "hold for forms" UI (ordered by the
+    /// loaded paradigm when available, else by frequency).
     pub fn forms_of_lemma(&self, lemma: String) -> Vec<String> {
         self.inner
             .lock()
             .expect("engine mutex poisoned")
             .forms_of_lemma(&lemma)
+    }
+
+    /// Loads build-time declension paradigms (`ru-hold-groups.tsv`) for
+    /// grouped hold-popups. Parsing is lenient, so this is infallible.
+    pub fn load_paradigms(&self, tsv: String) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_paradigms(Paradigms::from_tsv_str(&tsv));
+    }
+
+    /// Structured declension of a lemma (singular first, case-ordered) for a
+    /// grouped hold-popup. Empty when no paradigm is loaded for the lemma
+    /// (e.g. a verb/adverb, or absent): the shell then falls back to
+    /// `forms_of_lemma`.
+    pub fn paradigm_of_lemma(&self, lemma: String) -> Vec<ParadigmGroup> {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .paradigm_of_lemma(&lemma)
+            .map(|groups| groups.iter().map(to_ffi_group).collect())
+            .unwrap_or_default()
     }
 
     /// Plugs in a bigram language model (`#abbrev-lm v1` TSV artifact);
@@ -219,5 +321,39 @@ mod tests {
     #[test]
     fn rejects_bad_lexicon() {
         assert!(AbbrevEngine::from_lexicon_tsv("каша".into()).is_err());
+    }
+
+    #[test]
+    fn paradigm_ffi_surface() {
+        let engine = AbbrevEngine::with_demo_lexicon();
+        engine.load_paradigms("работа\tsing\tработа|работы|работе|работу|работой|работе\n".into());
+        let groups = engine.paradigm_of_lemma("работа".into());
+        assert_eq!(groups.len(), 1);
+        assert!(matches!(groups[0].number, GrammaticalNumber::Singular));
+        assert!(matches!(
+            groups[0].forms[0].case,
+            GrammaticalCase::Nominative
+        ));
+        assert_eq!(groups[0].forms[0].form, "работа");
+        assert!(groups[0].gender.is_none(), "nouns have no gender axis");
+        // Unknown lemma → empty, so the shell falls back to forms_of_lemma.
+        assert!(engine.paradigm_of_lemma("несуществующее".into()).is_empty());
+    }
+
+    #[test]
+    fn paradigm_ffi_adjective_carries_gender() {
+        let engine = AbbrevEngine::with_demo_lexicon();
+        engine.load_paradigms(
+            "красный\tsing.masc\tкрасный|красного|красному|красный|красным|красном\n\
+             красный\tplur\tкрасные|красных|красным|красные|красными|красных\n"
+                .into(),
+        );
+        let groups = engine.paradigm_of_lemma("красный".into());
+        assert_eq!(groups.len(), 2);
+        assert!(matches!(
+            groups[0].gender,
+            Some(GrammaticalGender::Masculine)
+        ));
+        assert!(groups[1].gender.is_none(), "plural has no gender");
     }
 }

@@ -29,6 +29,9 @@ let engine = null;
 // not written to history until the user types on/leaves the page: a tap is
 // only confirmed once it is kept.
 let pendingUndo = null;
+// Snapshot of what the strip currently offers, so the keyboard handlers can
+// act (digit = pick, arrows = navigate) without re-deriving it.
+let current = { word: "", context: "", groups: [] };
 
 async function fetchText(url) {
   const res = await fetch(url);
@@ -40,14 +43,16 @@ async function boot() {
   try {
     await init();
     els.status.textContent = "Загрузка словаря…";
-    const [lexicon, lm, shortcuts] = await Promise.all([
+    const [lexicon, lm, shortcuts, paradigms] = await Promise.all([
       fetchText("./assets/lexicon.tsv"),
       fetchText("./assets/lm.tsv").catch(() => null),
       fetchText("./assets/shortcuts.tsv").catch(() => null),
+      fetchText("./assets/hold-groups.tsv").catch(() => null),
     ]);
     engine = new WasmEngine(lexicon);
     if (lm) engine.load_language_model(lm);
     if (shortcuts) engine.load_shortcuts(shortcuts);
+    if (paradigms) engine.load_paradigms(paradigms);
     const saved = localStorage.getItem(HISTORY_KEY);
     if (saved) engine.import_history(saved);
     els.status.textContent = lm
@@ -80,7 +85,9 @@ function caretWord() {
 }
 
 function render() {
+  closePopup();
   els.strip.innerHTML = "";
+  current = { word: "", context: "", groups: [] };
   if (!engine) return;
   const { word, context } = caretWord();
   // Right after a choice the word is empty (caret sits past the inserted
@@ -98,6 +105,7 @@ function render() {
   } catch {
     return;
   }
+  current = { word, context, groups };
   groups.forEach((g, i) => els.strip.appendChild(chip(g, i, word, context)));
 }
 
@@ -107,8 +115,21 @@ function chip(group, rank, shorthand, context) {
 
   const main = document.createElement("button");
   main.className = "chip-main";
-  main.textContent = group.best.form;
-  main.title = `лемма: ${group.lemma}`;
+  main.type = "button";
+  // Roving tabindex: only the first chip is in the tab order; arrows move
+  // focus among the rest (managed in the strip keydown handler).
+  main.tabIndex = rank === 0 ? 0 : -1;
+  main._group = group;
+  main._rank = rank;
+  if (rank < 9) {
+    const badge = document.createElement("span");
+    badge.className = "chip-badge";
+    badge.textContent = rank + 1;
+    badge.setAttribute("aria-hidden", "true");
+    main.appendChild(badge);
+  }
+  main.appendChild(document.createTextNode(group.best.form));
+  main.title = `лемма: ${group.lemma} — клавиша ${rank + 1}`;
   main.addEventListener("click", () =>
     choose(group.best.form, shorthand, context, rank, false),
   );
@@ -117,33 +138,125 @@ function chip(group, rank, shorthand, context) {
   if (group.variants.length) {
     const forms = document.createElement("button");
     forms.className = "chip-forms";
+    forms.type = "button";
+    forms.tabIndex = -1;
     forms.textContent = "▾";
-    forms.title = "формы слова";
+    forms.title = "формы слова (стрелка вниз)";
     forms.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      openForms(forms, group, shorthand, context);
+      openForms(main, group, shorthand, context, false);
     });
     wrap.appendChild(forms);
   }
   return wrap;
 }
 
-function openForms(anchor, group, shorthand, context) {
+// Insert the best form of the rank-th group (the digit / Enter fast path).
+function chooseGroup(rank, fromHold) {
+  const g = current.groups[rank];
+  if (g) choose(g.best.form, current.word, current.context, rank, fromHold);
+}
+
+const stripMains = () => [...els.strip.querySelectorAll("button.chip-main")];
+
+function openForms(anchor, group, shorthand, context, focusFirst) {
   closePopup();
   const pop = document.createElement("div");
   pop.className = "popup";
   pop.id = "forms-popup";
-  for (const form of [group.best.form, ...group.variants]) {
+
+  // Every selectable form, in DOM order, so the keyboard can walk a flat list
+  // even when the popup is a 2-D declension grid.
+  const items = [];
+  const formButton = (form, label) => {
     const b = document.createElement("button");
-    b.textContent = form;
+    b.type = "button";
+    b.tabIndex = -1;
+    const n = items.length + 1;
+    if (n <= 9) {
+      const badge = document.createElement("span");
+      badge.className = "form-badge";
+      badge.textContent = n;
+      badge.setAttribute("aria-hidden", "true");
+      b.appendChild(badge);
+    }
+    if (label) {
+      const tag = document.createElement("span");
+      tag.className = "case-tag";
+      tag.textContent = label;
+      b.appendChild(tag);
+    }
+    b.appendChild(document.createTextNode(form));
     b.addEventListener("click", () => choose(form, shorthand, context, 0, true));
-    pop.appendChild(b);
+    items.push(b);
+    return b;
+  };
+
+  // Prefer the generated declension grid (ед./мн. × cases); fall back to the
+  // flat frequency list when the lemma has no paradigm (non-nouns).
+  let paradigm = [];
+  try {
+    paradigm = JSON.parse(engine.paradigm_of_lemma_json(group.lemma));
+  } catch {
+    paradigm = [];
   }
+  if (paradigm.length) {
+    pop.classList.add("grouped");
+    for (const grp of paradigm) {
+      const section = document.createElement("div");
+      section.className = "popup-group";
+      const head = document.createElement("div");
+      head.className = "popup-group-head";
+      // Adjective singulars carry a gender label ("ед." + "м. р."); nouns and
+      // plurals show the number alone.
+      head.textContent = grp.gender ? `${grp.number} ${grp.gender}` : grp.number;
+      section.appendChild(head);
+      for (const cell of grp.forms) section.appendChild(formButton(cell.form, cell.case));
+      pop.appendChild(section);
+    }
+  } else {
+    for (const form of [group.best.form, ...group.variants]) pop.appendChild(formButton(form));
+  }
+
+  // Keyboard: arrows walk the flat item list, digits jump, Enter selects,
+  // Esc closes back to the chip that opened it.
+  pop.addEventListener("keydown", (e) => {
+    const i = items.indexOf(document.activeElement);
+    const focusAt = (j) => items[(j + items.length) % items.length]?.focus();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePopup();
+      anchor.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      focusAt((i < 0 ? -1 : i) + 1);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      focusAt((i < 0 ? 0 : i) - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      focusAt(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      focusAt(items.length - 1);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      (items[i] || items[0])?.click();
+    } else if (e.key >= "1" && e.key <= "9" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const j = +e.key - 1;
+      if (items[j]) {
+        e.preventDefault();
+        items[j].click();
+      }
+    }
+  });
+
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.left = `${window.scrollX + r.left}px`;
   pop.style.top = `${window.scrollY + r.bottom + 4}px`;
   setTimeout(() => document.addEventListener("click", closePopup, { once: true }), 0);
+  if (focusFirst) items[0]?.focus();
 }
 
 function closePopup() {
@@ -193,6 +306,7 @@ function choose(form, shorthand, context, rank, fromHold) {
 function undoChip() {
   const b = document.createElement("button");
   b.className = "chip-main undo";
+  b.type = "button";
   b.textContent = `↶ отменить «${pendingUndo.shorthand}»`;
   b.title = "вернуть сокращение — это негативный сигнал (reverted)";
   b.addEventListener("click", revertLast);
@@ -251,6 +365,81 @@ els.editor.addEventListener("input", () => {
 els.editor.addEventListener("click", render);
 els.editor.addEventListener("keyup", (e) => {
   if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) render();
+});
+
+// Keyboard selection from the editor: a digit picks that suggestion outright
+// (the abbreviation alphabet is Cyrillic, so digits are free to repurpose
+// while the strip is up); Tab steps into the strip for arrow/forms control.
+els.editor.addEventListener("keydown", (e) => {
+  const firstBtn = els.strip.querySelector("button");
+  if (e.key === "Tab" && !e.shiftKey && firstBtn) {
+    e.preventDefault();
+    firstBtn.tabIndex = 0;
+    firstBtn.focus();
+    return;
+  }
+  if (
+    current.groups.length &&
+    e.key >= "1" &&
+    e.key <= "9" &&
+    !e.ctrlKey &&
+    !e.altKey &&
+    !e.metaKey
+  ) {
+    const idx = +e.key - 1;
+    if (idx < current.groups.length) {
+      e.preventDefault(); // select the suggestion instead of typing the digit
+      chooseGroup(idx, false);
+    }
+  }
+});
+
+// Navigation within the suggestion strip (roving focus over the chips).
+els.strip.addEventListener("keydown", (e) => {
+  const mains = stripMains();
+  const i = mains.indexOf(document.activeElement);
+  if (i === -1) return; // focus is on the undo chip or nothing actionable
+
+  if (e.key === "Escape" || e.key === "ArrowUp") {
+    e.preventDefault();
+    els.editor.focus();
+    return;
+  }
+  // The undo chip is also a `.chip-main` but has no suggestion behind it:
+  // let Enter fire its native revert and ignore digits/arrows.
+  if (mains[i].classList.contains("undo")) return;
+  const focusAt = (j) => {
+    const b = mains[(j + mains.length) % mains.length];
+    document.activeElement.tabIndex = -1;
+    b.tabIndex = 0;
+    b.focus();
+  };
+  if (e.key === "ArrowRight") {
+    e.preventDefault();
+    focusAt(i + 1);
+  } else if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    focusAt(i - 1);
+  } else if (e.key === "Home") {
+    e.preventDefault();
+    focusAt(0);
+  } else if (e.key === "End") {
+    e.preventDefault();
+    focusAt(mains.length - 1);
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    const g = mains[i]._group;
+    if (g && g.variants.length) openForms(mains[i], g, current.word, current.context, true);
+  } else if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    chooseGroup(mains[i]._rank, false);
+  } else if (e.key >= "1" && e.key <= "9" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    const idx = +e.key - 1;
+    if (idx < current.groups.length) {
+      e.preventDefault();
+      chooseGroup(idx, false);
+    }
+  }
 });
 els.exportHistory.addEventListener("click", () =>
   download(

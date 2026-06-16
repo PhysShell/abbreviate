@@ -17,6 +17,7 @@ mkdir -p "$here/assets"
 cp "$root/data/lexicons/ru-50k.tsv" "$here/assets/lexicon.tsv"
 cp "$root/data/lm/ru-lm.tsv" "$here/assets/lm.tsv"
 cp "$root/data/shortcuts/ru.tsv" "$here/assets/shortcuts.tsv"
+cp "$root/data/lexicons/ru-hold-groups.tsv" "$here/assets/hold-groups.tsv"
 
 echo "built. serve with:  python3 -m http.server -d $here 8000"
 echo "then open:          http://localhost:8000/"

@@ -3,17 +3,22 @@
 //! engine TSV out.
 //!
 //! Current importer accepts loose TSV/CSV-ish lines `form;lemma;freq`
-//! (`\t`, `;` or `,` as separators). Dedicated OpenCorpora-XML and
-//! RNC-frequency importers are the next planned additions — see
+//! (`\t`, `;` or `,` as separators). The `rnc` subcommand imports the RNC
+//! frequency dictionary and `calibrate` folds it into a lexicon (see
+//! `rnc.rs`); an OpenCorpora-XML importer is the next planned addition — see
 //! docs/ARCHITECTURE.md, "Конвейер данных".
 //!
 //! ```text
 //! lexicon-builder input.tsv -o lexicon.tsv [--min-freq 1.0]
 //! lexicon-builder bigrams corpus.txt --lexicon lexicon.tsv -o lm.tsv \
 //!     [--top 150000] [--min-count 3]
+//! lexicon-builder rnc freqrnc2011.csv -o rnc-freq.tsv
+//! lexicon-builder calibrate lexicon.tsv --rnc rnc-freq.tsv -o out.tsv \
+//!     [--max-len 4]
 //! ```
 
 mod bigrams;
+mod rnc;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -22,8 +27,11 @@ use abbrev_core::alphabet::normalize;
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("bigrams") {
-        return bigrams::cmd_bigrams(args.split_off(1));
+    match args.first().map(String::as_str) {
+        Some("bigrams") => return bigrams::cmd_bigrams(args.split_off(1)),
+        Some("rnc") => return rnc::cmd_rnc(args.split_off(1)),
+        Some("calibrate") => return rnc::cmd_calibrate(args.split_off(1)),
+        _ => {}
     }
     let mut input: Option<String> = None;
     let mut output: Option<String> = None;
@@ -42,7 +50,13 @@ fn main() -> ExitCode {
         }
     }
     let (Some(input), Some(output)) = (input, output) else {
-        return fail("usage: lexicon-builder <input> -o <output> [--min-freq N]");
+        return fail(
+            "usage:\n  \
+             lexicon-builder <input> -o <output> [--min-freq N]\n  \
+             lexicon-builder bigrams <corpus.txt> --lexicon <lexicon.tsv> -o <lm.tsv>\n  \
+             lexicon-builder rnc <freqrnc2011.csv> -o <rnc-freq.tsv>\n  \
+             lexicon-builder calibrate <lexicon.tsv> --rnc <rnc-freq.tsv> -o <out.tsv> [--max-len 4]",
+        );
     };
     let raw = match std::fs::read_to_string(&input) {
         Ok(r) => r,

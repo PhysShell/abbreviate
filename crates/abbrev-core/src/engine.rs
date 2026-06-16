@@ -14,6 +14,7 @@ use crate::history::UserHistory;
 use crate::index::{Indexes, delete_variants};
 use crate::lexicon::{EntryId, Lexicon};
 use crate::morph;
+use crate::paradigm::{ParadigmGroup, Paradigms};
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
 use crate::shortcuts::Shortcuts;
 
@@ -99,6 +100,7 @@ pub struct Engine {
     history: UserHistory,
     context_model: Box<dyn ContextModel>,
     shortcuts: Shortcuts,
+    paradigms: Option<Paradigms>,
     config: EngineConfig,
 }
 
@@ -127,6 +129,7 @@ impl Engine {
             history: UserHistory::default(),
             context_model: Box::new(NoContext),
             shortcuts: Shortcuts::default(),
+            paradigms: None,
             config,
         }
     }
@@ -134,6 +137,14 @@ impl Engine {
     /// Plugs in a contextual reranker (n-gram LM, neural model, ...).
     pub fn set_context_model(&mut self, model: Box<dyn ContextModel>) {
         self.context_model = model;
+    }
+
+    /// Loads build-time declension paradigms (`ru-hold-groups.tsv`), used to
+    /// render an ordered hold-popup grid (case×number for nouns, case×gender
+    /// for adjectives) instead of the lexicon's incomplete frequency-sorted
+    /// form pile.
+    pub fn set_paradigms(&mut self, paradigms: Paradigms) {
+        self.paradigms = Some(paradigms);
     }
 
     /// Loads the conventional-shortcuts layer (exact-match shorthand).
@@ -332,9 +343,16 @@ impl Engine {
         groups
     }
 
-    /// All forms of a lemma, most frequent first — backs the
-    /// "hold a suggestion to see inflected variants" UI.
+    /// All forms of a lemma for the "hold a suggestion to see its forms" UI.
+    ///
+    /// Prefers the complete, case-ordered generated paradigm
+    /// ([`set_paradigms`](Self::set_paradigms)) when one exists for the lemma;
+    /// otherwise falls back to the lexicon's (incomplete) forms, most
+    /// frequent first.
     pub fn forms_of_lemma(&self, lemma: &str) -> Vec<String> {
+        if let Some(forms) = self.paradigms.as_ref().and_then(|p| p.forms(lemma)) {
+            return forms;
+        }
         let mut ids = self
             .by_lemma
             .get(&normalize(lemma))
@@ -349,6 +367,15 @@ impl Engine {
         ids.into_iter()
             .map(|id| self.lexicon.get(id).form.clone())
             .collect()
+    }
+
+    /// Structured declension of a lemma — number (and, for adjectives,
+    /// gender) groups, each a case-ordered list — for a grouped hold-popup.
+    /// `None` when no generated paradigm is loaded for the lemma (e.g. a
+    /// verb/adverb, or absent from the artifact); callers should then fall
+    /// back to [`forms_of_lemma`](Self::forms_of_lemma).
+    pub fn paradigm_of_lemma(&self, lemma: &str) -> Option<&[ParadigmGroup]> {
+        self.paradigms.as_ref().and_then(|p| p.get(lemma))
     }
 
     /// Records a **confirmed** suggestion (picked and kept); future
@@ -720,5 +747,31 @@ mod tests {
         let forms = engine().forms_of_lemma("работа");
         assert!(forms.len() >= 2);
         assert_eq!(forms[0], "работа");
+    }
+
+    #[test]
+    fn paradigms_override_forms_of_lemma_with_case_order() {
+        use crate::paradigm::{Number, Paradigms};
+        let mut e = engine();
+        // Without paradigms: structured lookup is empty, forms come from the
+        // lexicon (frequency-sorted, possibly incomplete).
+        assert!(e.paradigm_of_lemma("работа").is_none());
+
+        e.set_paradigms(Paradigms::from_tsv_str(
+            "работа\tsing\tработа|работы|работе|работу|работой|работе\n\
+             работа\tplur\tработы|работ|работам|работы|работами|работах\n",
+        ));
+
+        // forms_of_lemma now returns the complete, case-ordered paradigm.
+        let forms = e.forms_of_lemma("работа");
+        assert_eq!(forms[0], "работа");
+        assert!(forms.contains(&"работам".to_string())); // plural form not in demo lexicon
+        // Structured grid is available and singular-first.
+        let groups = e.paradigm_of_lemma("работа").unwrap();
+        assert_eq!(groups[0].number, Number::Singular);
+
+        // A lemma with no paradigm still falls back to the lexicon forms.
+        assert!(e.paradigm_of_lemma("привет").is_none());
+        assert!(!e.forms_of_lemma("привет").is_empty());
     }
 }
