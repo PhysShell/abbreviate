@@ -133,10 +133,11 @@ class ScratchpadActivity : Activity(), TextHost {
     // --- Header ------------------------------------------------------------
 
     private fun title(): TextView {
-        val s = SpannableStringBuilder("abbreviate  демо")
-        s.setSpan(StyleSpan(Typeface.BOLD), 0, 10, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
-        s.setSpan(ForegroundColorSpan(MUTED), 10, s.length, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
-        s.setSpan(RelativeSizeSpan(0.6f), 10, s.length, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+        val word = "abbreviate"
+        val s = SpannableStringBuilder("$word  демо")
+        s.setSpan(StyleSpan(Typeface.BOLD), 0, word.length, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+        s.setSpan(ForegroundColorSpan(MUTED), word.length, s.length, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+        s.setSpan(RelativeSizeSpan(0.6f), word.length, s.length, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
         return TextView(this).apply {
             text = s
             setTextColor(INK)
