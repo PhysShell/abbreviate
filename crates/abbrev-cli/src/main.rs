@@ -8,6 +8,7 @@
 //! ```
 
 mod generate;
+mod snapshot;
 mod tune;
 
 use std::collections::BTreeMap;
@@ -25,10 +26,11 @@ fn main() -> ExitCode {
         Some("repl") => cmd_repl(args.collect()),
         Some("bench") => cmd_bench(args.collect()),
         Some("gen") => generate::cmd_gen(args.collect()),
+        Some("snapshot") => snapshot::cmd_snapshot(args.collect()),
         Some("tune") => tune::cmd_tune(args.map(String::from).collect()),
         _ => {
             eprintln!(
-                "usage: abbrev <suggest|repl|bench|gen|tune> [args]  (see crates/abbrev-cli)"
+                "usage: abbrev <suggest|repl|bench|gen|snapshot|tune> [args]  (see crates/abbrev-cli)"
             );
             ExitCode::FAILURE
         }

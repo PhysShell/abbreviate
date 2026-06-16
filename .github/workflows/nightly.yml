@@ -1,0 +1,30 @@
+name: Nightly fuzz
+
+# The PR/push CI runs proptest at its default ~256 cases — enough to catch
+# obvious breakage fast. This job re-runs the same property suite at a much
+# higher case count on a schedule, so rare invariant violations (a form the
+# engine should never surface, a non-deterministic ranking) surface without
+# slowing down every PR. Manually triggerable via the Actions tab.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Huge volume: ~400x the default. The properties are the independent oracle,
+  # so this is the "two results check themselves" safety net.
+  PROPTEST_CASES: "100000"
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # read-only job, no git writes
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Property suite (high volume)
+        run: cargo test -p abbrev-core --release --test properties
