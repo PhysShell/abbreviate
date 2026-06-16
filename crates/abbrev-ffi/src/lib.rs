@@ -110,19 +110,22 @@ fn to_ffi_case(case: Case) -> GrammaticalCase {
 
 #[derive(Debug, uniffi::Error)]
 pub enum AbbrevError {
-    InvalidLexicon { message: String },
-    InvalidLanguageModel { message: String },
-    InvalidShortcuts { message: String },
+    // NB: the field is `reason`, not `message` — a variant field named `message`
+    // collides with `Throwable.message` in UniFFI's generated Kotlin (the error
+    // enum maps to a `kotlin.Exception` subclass).
+    InvalidLexicon { reason: String },
+    InvalidLanguageModel { reason: String },
+    InvalidShortcuts { reason: String },
 }
 
 impl fmt::Display for AbbrevError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidLexicon { message } => write!(f, "invalid lexicon: {message}"),
-            Self::InvalidLanguageModel { message } => {
-                write!(f, "invalid language model: {message}")
+            Self::InvalidLexicon { reason } => write!(f, "invalid lexicon: {reason}"),
+            Self::InvalidLanguageModel { reason } => {
+                write!(f, "invalid language model: {reason}")
             }
-            Self::InvalidShortcuts { message } => write!(f, "invalid shortcuts: {message}"),
+            Self::InvalidShortcuts { reason } => write!(f, "invalid shortcuts: {reason}"),
         }
     }
 }
@@ -150,7 +153,7 @@ impl AbbrevEngine {
     #[uniffi::constructor]
     pub fn from_lexicon_tsv(tsv: String) -> Result<Arc<Self>, AbbrevError> {
         let lexicon = Lexicon::from_tsv_str(&tsv).map_err(|e| AbbrevError::InvalidLexicon {
-            message: e.to_string(),
+            reason: e.to_string(),
         })?;
         Ok(Arc::new(Self {
             inner: Mutex::new(Engine::new(lexicon)),
@@ -241,7 +244,7 @@ impl AbbrevEngine {
     pub fn load_language_model(&self, tsv: String) -> Result<(), AbbrevError> {
         let model =
             BigramModel::from_tsv_str(&tsv).map_err(|e| AbbrevError::InvalidLanguageModel {
-                message: e.to_string(),
+                reason: e.to_string(),
             })?;
         self.inner
             .lock()
@@ -254,7 +257,7 @@ impl AbbrevEngine {
     pub fn load_shortcuts(&self, tsv: String) -> Result<(), AbbrevError> {
         let shortcuts =
             Shortcuts::from_tsv_str(&tsv).map_err(|e| AbbrevError::InvalidShortcuts {
-                message: e.to_string(),
+                reason: e.to_string(),
             })?;
         self.inner
             .lock()
