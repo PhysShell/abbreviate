@@ -113,7 +113,7 @@ class AbbrevImeService : InputMethodService(), TextHost {
         val c = controller
         if (c != null && !c.state.isEmpty) {
             val token = c.state.token
-            val form = c.accept(this, c.state.selected.coerceAtLeast(0))
+            val form = c.accept(this, 0) // always the top suggestion
             if (form != null) {
                 lastAutoAccept = token to form
                 refresh()
