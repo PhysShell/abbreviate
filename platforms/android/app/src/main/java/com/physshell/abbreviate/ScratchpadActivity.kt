@@ -130,6 +130,7 @@ class ScratchpadActivity : Activity(), TextHost {
         }
 
         runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread // load outlived the Activity
             result.onSuccess { (port, hasLm, isDemo) ->
                 controller = SuggestionController(port)
                 editor.isEnabled = true
