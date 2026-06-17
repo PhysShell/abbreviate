@@ -35,6 +35,7 @@ idempotent: same inputs -> byte-identical output.
 """
 
 import argparse
+import gzip
 import os
 import sys
 import tempfile
@@ -59,12 +60,33 @@ def titlecase(word: str) -> str:
 
 
 def read_names(path):
+    """Read one name per line from a plain or gzipped UTF-8 text list.
+
+    The Natasha `.dict` files this targets are newline-delimited text (the
+    legacy yargy-era name lists), so a `.dict`, `.txt` or `.gz` all work: we
+    sniff the gzip magic and decode UTF-8. If the bytes aren't decodable text
+    (a packed DAWG/marisa-trie or a pickle), fail loudly with guidance instead
+    of emitting garbage 'names' — the format assumption lives here, in one
+    place, so a surprise is a one-line fix rather than a corrupt artifact."""
+    with open(path, "rb") as f:
+        blob = f.read()
+    if blob[:2] == b"\x1f\x8b":  # gzip magic
+        blob = gzip.decompress(blob)
+    if b"\x00" in blob:
+        raise ValueError(
+            f"{path}: binary content (NUL bytes), not a newline name list. "
+            "Expected plain/gzipped UTF-8 text, one name per line; if mawo "
+            "ships a packed DAWG/pickle, convert it first (see read_names)."
+        )
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{path}: not UTF-8 text ({e}); see read_names docstring") from e
     names = []
-    with open(path, encoding="utf-8") as f:
-        for raw in f:
-            name = raw.strip()
-            if name and not name.startswith("#"):
-                names.append(name)
+    for raw in text.splitlines():
+        name = raw.strip()
+        if name and not name.startswith("#"):
+            names.append(name)
     return names
 
 
@@ -97,7 +119,7 @@ def main() -> int:
     for path, kind in jobs:
         try:
             names.extend((token, kind) for token in read_names(path))
-        except OSError as e:
+        except (OSError, ValueError) as e:
             print(f"cannot read {path}: {e}", file=sys.stderr)
             return 1
 
