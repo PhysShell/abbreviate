@@ -1,0 +1,22 @@
+# Illustrative hand-built sample of scripts/names.py output — NOT the real
+# artifact. The full data/lexicons/ru-names.tsv (~hundreds of thousands of
+# forms) is generated on a dev machine from the Natasha name dictionaries
+# (mawo-nlp-data, MIT) via mawo-pymorphy3; see tools/lexicon-builder/scripts/names.py.
+# This sample exists so reviewers can see the exact schema and confirm it
+# satisfies the engine lexicon contract (form<TAB>lemma<TAB>freq<TAB>tags).
+#
+# Note the dedup: Иванова is both gent and accs of Иванов (sing); the nomn-first
+# case order keeps a single deterministic tag per surface form.
+Иван	Иван	1	NOUN,anim,masc,Name sing,nomn
+Ивана	Иван	1	NOUN,anim,masc,Name sing,gent
+Ивану	Иван	1	NOUN,anim,masc,Name sing,datv
+Иваном	Иван	1	NOUN,anim,masc,Name sing,ablt
+Иване	Иван	1	NOUN,anim,masc,Name sing,loct
+Иванов	Иванов	1	NOUN,anim,masc,Surn sing,nomn
+Иванова	Иванов	1	NOUN,anim,masc,Surn sing,gent
+Иванову	Иванов	1	NOUN,anim,masc,Surn sing,datv
+Ивановым	Иванов	1	NOUN,anim,masc,Surn sing,ablt
+Иванове	Иванов	1	NOUN,anim,masc,Surn sing,loct
+Ивановы	Иванов	1	NOUN,anim,masc,Surn plur,nomn
+Ивановых	Иванов	1	NOUN,anim,masc,Surn plur,gent
+Ивановыми	Иванов	1	NOUN,anim,masc,Surn plur,ablt
