@@ -1,0 +1,95 @@
+name: Build name lexicon
+
+# Regenerates data/lexicons/ru-names.tsv from the Natasha name dictionaries
+# (mawo-nlp-data, MIT) using scripts/names.py + mawo-pymorphy3 — the step that
+# can't run in the offline dev sandbox (no PyPI, no release egress). Manual:
+# the source is a pinned upstream release, not something that changes per push,
+# so we trigger on demand and land the artifact as a reviewable PR.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "mawo-nlp-data release tag to pull name dictionaries from"
+        default: "v1.0.0"
+
+# Needs to open a PR with the regenerated artifact.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: build-names
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mawo-pymorphy3
+        run: pip install mawo-pymorphy3
+
+      - name: Fetch Natasha name dictionaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ inputs.release_tag }}" \
+            --repo mawo-ru/mawo-nlp-data \
+            --pattern 'natasha-data-*.tar.gz' \
+            --output natasha-data.tar.gz
+          mkdir -p mawo
+          tar -xzf natasha-data.tar.gz -C mawo
+          echo "Name dictionaries found in the archive:"
+          find mawo -name '*.dict' -print
+
+      - name: Generate ru-names.tsv
+        run: |
+          set -euo pipefail
+          # Combined given names + the 2025-updated surname and patronymic
+          # lists. names.py reads plain or gzipped UTF-8 text and inflects each
+          # name through mawo-pymorphy3; the locator tolerates archive layout.
+          first=$(find mawo -name 'first_all_2025.dict' | head -1)
+          last=$(find mawo -name 'last_updated_2025.dict' | head -1)
+          middle=$(find mawo -name 'middle.dict' | head -1)
+          test -n "$first"  || { echo "::error::missing first_all_2025.dict";  exit 1; }
+          test -n "$last"   || { echo "::error::missing last_updated_2025.dict"; exit 1; }
+          test -n "$middle" || { echo "::error::missing middle.dict";           exit 1; }
+          python3 tools/lexicon-builder/scripts/names.py \
+            --first "$first" --surname "$last" --patronymic "$middle" \
+            -o data/lexicons/ru-names.tsv
+          echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows:"
+          head -8 data/lexicons/ru-names.tsv
+
+      # Always keep the artifact downloadable, even if the PR step is skipped.
+      - name: Upload ru-names.tsv artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ru-names
+          path: data/lexicons/ru-names.tsv
+
+      - name: Open PR with the regenerated lexicon
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: bot/ru-names
+          base: ${{ github.ref_name }}
+          add-paths: data/lexicons/ru-names.tsv
+          commit-message: "data(names): regenerate ru-names.tsv from mawo-nlp-data"
+          title: "data(names): refresh ru-names.tsv from mawo-nlp-data ${{ inputs.release_tag }}"
+          body: |
+            Automated regeneration of `data/lexicons/ru-names.tsv` from the
+            Natasha name dictionaries (mawo-nlp-data `${{ inputs.release_tag }}`,
+            MIT) via `tools/lexicon-builder/scripts/names.py` + mawo-pymorphy3.
+
+            Review before merge:
+            - **size** — declined surnames make this large; decide whether to
+              version it or gate by frequency / ship gzipped;
+            - downstream: merge with `ru-50k.tsv` and re-run `paradigms.py`
+              over the union so names get hold-groups too.

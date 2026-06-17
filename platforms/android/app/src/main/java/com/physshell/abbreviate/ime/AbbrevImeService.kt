@@ -35,7 +35,13 @@ import kotlin.concurrent.thread
  *    immediate backspace reverts it back to the typed abbreviation);
  *  - an EN/РУ toggle flips to a Latin QWERTY (type Latin without changing the
  *    system layout); a "тр" key transliterates the current selection
- *    Cyrillic→Latin (dumb, letter-by-letter).
+ *    Cyrillic→Latin (dumb, letter-by-letter);
+ *  - a "⇄" key flips the Cyrillic side between the familiar full ЙЦУКЕН (kept
+ *    for people used to it — the default) and a consonant-first layout that
+ *    matches what this IME is actually for: the main rows hold only consonants
+ *    (in their ЙЦУКЕН positions, vowels removed), with a thin vowel row on top
+ *    that collapses to a slim handle via a "▴/▾" toggle. The layout choice and
+ *    the vowel-row visibility are remembered across sessions (SharedPreferences).
  *
  * No INTERNET permission: fully offline.
  */
@@ -52,12 +58,22 @@ class AbbrevImeService : InputMethodService(), TextHost {
     // Latin QWERTY instead of ЙЦУКЕН when true (the EN/РУ toggle).
     private var latin = false
 
+    // Cyrillic side: consonant-first layout when true, full ЙЦУКЕН (default) when
+    // false. When consonant, [vowelsVisible] toggles the thin top vowel row.
+    // Both persist across sessions (see [prefs]).
+    private var ruConsonant = false
+    private var vowelsVisible = true
+
+    private val prefs by lazy { getSharedPreferences("abbrev_ime", MODE_PRIVATE) }
+
     // Last space-triggered auto-accept: (typed token, inserted form). If the very
     // next key is backspace we restore the token instead of deleting a char.
     private var lastAutoAccept: Pair<String, String>? = null
 
     override fun onCreate() {
         super.onCreate()
+        ruConsonant = prefs.getBoolean(KEY_CONSONANT, false)
+        vowelsVisible = prefs.getBoolean(KEY_VOWELS, true)
         // ~11 MB of TSV: parse + build the index off the main thread.
         thread(name = "abbrev-ime-load") {
             val loaded = EngineLoader.fromAssets(assets)
@@ -160,6 +176,23 @@ class AbbrevImeService : InputMethodService(), TextHost {
         refresh()
     }
 
+    /** Flip the Cyrillic side between full ЙЦУКЕН and the consonant-first layout. */
+    private fun toggleRuLayout() {
+        ruConsonant = !ruConsonant
+        prefs.edit().putBoolean(KEY_CONSONANT, ruConsonant).apply()
+        lastAutoAccept = null
+        setInputView(buildKeyboard())
+        refresh() // setInputView rebuilds the strip view; repopulate it
+    }
+
+    /** Show/hide the thin vowel row (consonant layout only). */
+    private fun toggleVowels() {
+        vowelsVisible = !vowelsVisible
+        prefs.edit().putBoolean(KEY_VOWELS, vowelsVisible).apply()
+        setInputView(buildKeyboard())
+        refresh() // setInputView rebuilds the strip view; repopulate it
+    }
+
     /** Transliterate the current selection Cyrillic→Latin, in place. */
     private fun onTranslit() {
         val ic = currentInputConnection ?: return
@@ -249,12 +282,18 @@ class AbbrevImeService : InputMethodService(), TextHost {
             LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(4) },
         )
 
-        val rows = if (latin) LATIN_ROWS else RU_ROWS
+        // Consonant layout: a thin vowel row on top, collapsible to a slim handle.
+        if (!latin && ruConsonant) {
+            root.addView(if (vowelsVisible) vowelRow() else vowelHandle())
+        }
+
+        val rows = when {
+            latin -> LATIN_ROWS
+            ruConsonant -> CONSONANT_ROWS
+            else -> RU_ROWS
+        }
         rows.forEachIndexed { i, letters ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-            }
+            val row = letterRow()
             for (ch in letters) row.addView(key(ch.toString()) { onKey(ch.toString()) })
             // Backspace on the right end of the last letter row (not bottom-left,
             // where the system "hide keyboard" button sits).
@@ -265,13 +304,32 @@ class AbbrevImeService : InputMethodService(), TextHost {
         return root
     }
 
+    private fun letterRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+        }
+
+    /** Thin row of vowels above the consonant rows; "▴" collapses it. */
+    private fun vowelRow(): LinearLayout =
+        letterRow().apply {
+            for (ch in VOWELS) addView(vowelKey(ch.toString()) { onKey(ch.toString()) })
+            addView(vowelKey("▴") { toggleVowels() })
+        }
+
+    /** Slim full-width handle that re-expands the hidden vowel row. */
+    private fun vowelHandle(): LinearLayout =
+        letterRow().apply { addView(vowelKey("гласные ▾") { toggleVowels() }) }
+
     private fun bottomRow(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
             addView(key(if (latin) "РУ" else "EN", 1.6f) { toggleLayout() })
-            addView(key("тр", 1.6f) { onTranslit() })
-            addView(key("пробел", 5f) { onSpace() })
+            // Consonant/full ЙЦУКЕН switch — only meaningful on the Cyrillic side.
+            if (!latin) addView(key("⇄", 1.4f) { toggleRuLayout() })
+            addView(key("тр", 1.4f) { onTranslit() })
+            addView(key("пробел", 4.5f) { onSpace() })
             addView(key("↵", 1.6f) { onEnter() })
         }
 
@@ -285,6 +343,22 @@ class AbbrevImeService : InputMethodService(), TextHost {
             minWidth = 0
             minimumWidth = 0
             setPadding(0, dp(11), 0, dp(11))
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, weight)
+                .apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
+        }
+
+    /** A shorter, smaller key for the thin vowel row (and its toggle/handle). */
+    private fun vowelKey(label: String, weight: Float = 1f, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            isAllCaps = false
+            setTextColor(INK)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            background = keyBackground()
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(0, dp(6), 0, dp(6))
             setOnClickListener { onClick() }
             layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, weight)
                 .apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
@@ -320,7 +394,15 @@ class AbbrevImeService : InputMethodService(), TextHost {
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
     companion object {
+        private const val KEY_CONSONANT = "ru_consonant"
+        private const val KEY_VOWELS = "vowels_visible"
+
         private val RU_ROWS = listOf("йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю")
+        // RU_ROWS with the vowels (а е ё и о у ы э ю я) dropped — consonants keep
+        // their ЙЦУКЕН positions, so muscle memory mostly carries over.
+        private val CONSONANT_ROWS = listOf("йцкнгшщзхъ", "фвпрлдж", "чсмтьб")
+        // The dropped vowels, surfaced in the thin top row.
+        private const val VOWELS = "аеиоуыяюэё"
         private val LATIN_ROWS = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
 
         // Plain, opinion-free RU→Latin map (the "dumb" transliteration).
