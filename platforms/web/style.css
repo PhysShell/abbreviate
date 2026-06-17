@@ -197,3 +197,68 @@ h1 small { color: var(--muted); font-size: 0.5em; font-weight: 400; }
 .data-row button:hover { border-color: var(--accent); }
 .data-row .danger:hover { border-color: var(--danger); color: var(--danger); }
 .privacy { font-size: 0.82rem; }
+
+/* ── Typing tester (test.html) ─────────────────────────────────────────── */
+.test-modes {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.test-modes label { color: var(--ink); }
+.test-modes button {
+  margin-left: auto;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid #2c303a;
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  font: inherit;
+}
+.test-modes button:hover:not(:disabled) { border-color: var(--accent); }
+.test-modes button:disabled { opacity: 0.5; cursor: default; }
+
+.test-target {
+  background: var(--panel);
+  border: 1px solid #2c303a;
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+  margin-bottom: 0.6rem;
+  font-size: 1.15rem;
+  line-height: 1.6;
+  min-height: 1.6em;
+}
+.test-target .ok { color: var(--accent); }
+
+.test-countdown {
+  font-size: 3rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--accent);
+  padding: 1rem 0;
+}
+
+.test-result {
+  margin-top: 0.8rem;
+  padding: 0.7rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 1.05rem;
+}
+
+.test-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.6rem;
+  font-size: 0.9rem;
+}
+.test-table th,
+.test-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #2c303a;
+}
+.test-table th { color: var(--muted); font-weight: 600; }
