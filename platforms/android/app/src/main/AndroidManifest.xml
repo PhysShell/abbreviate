@@ -33,5 +33,10 @@
                 android:name="android.view.im"
                 android:resource="@xml/method" />
         </service>
+        <activity
+            android:name=".TestActivity"
+            android:exported="false"
+            android:label="Тест набора"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>
