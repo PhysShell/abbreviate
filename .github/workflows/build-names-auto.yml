@@ -10,7 +10,7 @@ on:
     branches: [ci/build-names]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-names-auto
@@ -66,9 +66,30 @@ jobs:
           echo "..."
           # A few surnames to confirm coverage (declension + plural).
           grep -E '^Иванов' data/lexicons/ru-names.tsv | head -12 || true
+          gzip -9 -n data/lexicons/ru-names.tsv
+          echo "Gzipped to $(du -h data/lexicons/ru-names.tsv.gz | cut -f1)."
 
-      - name: Upload ru-names.tsv artifact
+      - name: Upload ru-names.tsv.gz artifact
         uses: actions/upload-artifact@v4
         with:
           name: ru-names
-          path: data/lexicons/ru-names.tsv
+          path: data/lexicons/ru-names.tsv.gz
+
+      - name: Push ru-names.tsv.gz to bot/ru-names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b bot/ru-names
+          git add data/lexicons/ru-names.tsv.gz
+          if git diff --cached --quiet; then
+            echo "ru-names.tsv.gz unchanged — nothing to push."
+            exit 0
+          fi
+          git commit -m "data(names): regenerate ru-names.tsv.gz from mawo-nlp-data"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            bot/ru-names
+          echo "::notice::Pushed data/lexicons/ru-names.tsv.gz to bot/ru-names."
