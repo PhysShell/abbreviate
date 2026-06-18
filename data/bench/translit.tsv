@@ -1,0 +1,18 @@
+# Offline benchmark: input<TAB>expected surface form.
+# Regression guard for the transliteration-terms layer (data/translit/ru-tech.tsv,
+# loaded as a second --shortcuts source). A Russian dev typing a term in
+# Cyrillic should get its canonical English spelling as a candidate.
+# Run: cargo run -p abbrev-cli -- bench data/bench/translit.tsv \
+#        --shortcuts data/shortcuts/ru.tsv --shortcuts data/translit/ru-tech.tsv
+гитхаб	GitHub
+гитхабе	GitHub
+гитлаб	GitLab
+гит	Git
+джира	Jira
+битбакет	Bitbucket
+докерхаб	Docker Hub
+питон	Python
+пайтон	Python
+джаваскрипт	JavaScript
+тайпскрипт	TypeScript
+котлин	Kotlin
