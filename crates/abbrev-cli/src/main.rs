@@ -70,6 +70,7 @@ fn build_engine(
 
 fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut lexicon_path: Option<String> = None;
+    let mut extra_lexicon_paths: Vec<String> = Vec::new();
     let mut lm_path: Option<String> = None;
     let mut shortcuts_paths: Vec<String> = Vec::new();
     let mut paradigms_path: Option<String> = None;
@@ -81,6 +82,12 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         match arg {
             "--lexicon" => {
                 lexicon_path = Some(it.next().ok_or("--lexicon needs a path")?.to_string());
+            }
+            "--extra-lexicon" => {
+                // Repeatable: fold an opt-in source (e.g. the gunzipped names
+                // lexicon) into the base. Not forced on any platform.
+                extra_lexicon_paths
+                    .push(it.next().ok_or("--extra-lexicon needs a path")?.to_string());
             }
             "--lm" => {
                 lm_path = Some(it.next().ok_or("--lm needs a path")?.to_string());
@@ -109,7 +116,7 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             other => positional.push(other.to_string()),
         }
     }
-    let lexicon = match lexicon_path {
+    let mut lexicon = match lexicon_path {
         Some(path) => {
             let tsv = std::fs::read_to_string(&path)
                 .map_err(|e| format!("cannot read lexicon {path}: {e}"))?;
@@ -117,6 +124,13 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => Lexicon::demo(),
     };
+    for path in &extra_lexicon_paths {
+        let tsv = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read extra lexicon {path}: {e}"))?;
+        lexicon
+            .extend_from_tsv_str(&tsv)
+            .map_err(|e| format!("{path}: {e}"))?;
+    }
     let lm = match lm_path {
         Some(path) => {
             let tsv = std::fs::read_to_string(&path)
