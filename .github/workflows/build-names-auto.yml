@@ -1,0 +1,74 @@
+name: Build name lexicon (auto)
+
+# DEV-AUTOMATION ONLY — lives only on the throwaway `ci/build-names` branch,
+# never merged to main. Mirrors build-names.yml but triggers on push to this
+# branch, so an agent that can push (but not dispatch workflows via the API)
+# can kick a run by committing here, then read the logs/artifact. Keeps the
+# real build-names.yml on main dispatch-only and clean.
+on:
+  push:
+    branches: [ci/build-names]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-names-auto
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mawo-pymorphy3
+        run: pip install mawo-pymorphy3
+
+      - name: Fetch Natasha name dictionaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "v1.0.0" \
+            --repo mawo-ru/mawo-nlp-data \
+            --pattern 'natasha-data-*.tar.gz' \
+            --output natasha-data.tar.gz
+          mkdir -p mawo
+          tar -xzf natasha-data.tar.gz -C mawo
+          echo "Name dictionaries found in the archive:"
+          find mawo -name '*.dict' -print
+
+      - name: Generate ru-names.tsv
+        run: |
+          set -euo pipefail
+          # Base lists (bulk, ~95k surnames) + the small 2025 deltas; names.py
+          # dedups by (form, lemma).
+          args=()
+          while IFS= read -r f; do args+=(--first "$f"); done < <(
+            find mawo \( -name 'first.dict' -o -name 'first_all_2025.dict' \))
+          while IFS= read -r f; do args+=(--surname "$f"); done < <(
+            find mawo \( -name 'last.dict' -o -name 'last_updated_2025.dict' \))
+          while IFS= read -r f; do args+=(--patronymic "$f"); done < <(
+            find mawo -name 'middle.dict')
+          echo "names.py inputs: ${args[*]}"
+          test ${#args[@]} -gt 0 || { echo "::error::no name dicts found"; exit 1; }
+          python3 tools/lexicon-builder/scripts/names.py \
+            "${args[@]}" -o data/lexicons/ru-names.tsv
+          echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows, $(du -h data/lexicons/ru-names.tsv | cut -f1):"
+          head -8 data/lexicons/ru-names.tsv
+          echo "..."
+          # A few surnames to confirm coverage (declension + plural).
+          grep -E '^Иванов' data/lexicons/ru-names.tsv | head -12 || true
+
+      - name: Upload ru-names.tsv artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ru-names
+          path: data/lexicons/ru-names.tsv
