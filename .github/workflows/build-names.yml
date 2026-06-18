@@ -12,10 +12,11 @@ on:
         description: "mawo-nlp-data release tag to pull name dictionaries from"
         default: "v1.0.0"
 
-# Needs to open a PR with the regenerated artifact.
+# Pushes the regenerated artifact to a staging branch. Actions cannot *create*
+# PRs under this org's settings, but it can push a branch — a human opens the
+# PR from bot/ru-names in the UI.
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: build-names
@@ -75,21 +76,24 @@ jobs:
           name: ru-names
           path: data/lexicons/ru-names.tsv
 
-      - name: Open PR with the regenerated lexicon
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: bot/ru-names
-          base: ${{ github.ref_name }}
-          add-paths: data/lexicons/ru-names.tsv
-          commit-message: "data(names): regenerate ru-names.tsv from mawo-nlp-data"
-          title: "data(names): refresh ru-names.tsv from mawo-nlp-data ${{ inputs.release_tag }}"
-          body: |
-            Automated regeneration of `data/lexicons/ru-names.tsv` from the
-            Natasha name dictionaries (mawo-nlp-data `${{ inputs.release_tag }}`,
-            MIT) via `tools/lexicon-builder/scripts/names.py` + mawo-pymorphy3.
-
-            Review before merge:
-            - **size** — declined surnames make this large; decide whether to
-              version it or gate by frequency / ship gzipped;
-            - downstream: merge with `ru-50k.tsv` and re-run `paradigms.py`
-              over the union so names get hold-groups too.
+      # Actions can't create a PR under this org's settings, so push the
+      # artifact to a staging branch instead and let a human open the PR.
+      - name: Push ru-names.tsv to bot/ru-names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b bot/ru-names
+          git add data/lexicons/ru-names.tsv
+          if git diff --cached --quiet; then
+            echo "ru-names.tsv unchanged — nothing to push."
+            exit 0
+          fi
+          git commit -m "data(names): regenerate ru-names.tsv from mawo-nlp-data ${{ inputs.release_tag }}"
+          # Bot-owned, regenerated each run, so force-push is fine.
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            bot/ru-names
+          echo "::notice::Pushed data/lexicons/ru-names.tsv to bot/ru-names — open a PR from the GitHub UI."
