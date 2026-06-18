@@ -5,9 +5,10 @@ Russian given names, surnames and patronymics decline, so the long tail of
 proper names this IME otherwise can't reach (`ивн`->Иван, `пткв`->Петкова) is
 best served by folding the *declined surface forms* into the lexicon, exactly
 like ordinary words. This reads one name per line and emits the engine TSV
-`form<TAB>lemma<TAB>freq<TAB>tags`, ready to merge into the surface-form
-lexicon (concatenate the output as data/lexicons/ru-names.tsv; the normal
-build sorts and folds it in alongside ru-50k.tsv).
+`form<TAB>lemma<TAB>freq<TAB>tags`, ready to merge alongside ru-50k.tsv. This
+script writes plain TSV; the build/CI versions it gzipped
+(data/lexicons/ru-names.tsv.gz, ~1.2 MB vs ~12 MB) and gunzips before merging,
+keeping lexicon-builder dependency-free.
 
 Source of the name lists: the Natasha name dictionaries redistributed in
 mawo-nlp-data (first/last/middle, ~113k entries; MIT, (c) Alexander

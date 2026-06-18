@@ -71,17 +71,22 @@ jobs:
             "${args[@]}" -o data/lexicons/ru-names.tsv
           echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows, $(du -h data/lexicons/ru-names.tsv | cut -f1):"
           head -8 data/lexicons/ru-names.tsv
+          # Version the artifact gzipped (~1.2 MB vs ~12 MB raw); the build
+          # gunzips it before merging into the engine lexicon. -n drops the
+          # mtime/name header so the .gz is byte-stable across runs.
+          gzip -9 -n data/lexicons/ru-names.tsv
+          echo "Gzipped to $(du -h data/lexicons/ru-names.tsv.gz | cut -f1)."
 
-      # Always keep the artifact downloadable, even if the PR step is skipped.
-      - name: Upload ru-names.tsv artifact
+      # Always keep the artifact downloadable, even if the push step is skipped.
+      - name: Upload ru-names.tsv.gz artifact
         uses: actions/upload-artifact@v4
         with:
           name: ru-names
-          path: data/lexicons/ru-names.tsv
+          path: data/lexicons/ru-names.tsv.gz
 
       # Actions can't create a PR under this org's settings, so push the
       # artifact to a staging branch instead and let a human open the PR.
-      - name: Push ru-names.tsv to bot/ru-names
+      - name: Push ru-names.tsv.gz to bot/ru-names
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -89,14 +94,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b bot/ru-names
-          git add data/lexicons/ru-names.tsv
+          git add data/lexicons/ru-names.tsv.gz
           if git diff --cached --quiet; then
-            echo "ru-names.tsv unchanged — nothing to push."
+            echo "ru-names.tsv.gz unchanged — nothing to push."
             exit 0
           fi
-          git commit -m "data(names): regenerate ru-names.tsv from mawo-nlp-data ${{ inputs.release_tag }}"
+          git commit -m "data(names): regenerate ru-names.tsv.gz from mawo-nlp-data ${{ inputs.release_tag }}"
           # Bot-owned, regenerated each run, so force-push is fine.
           git push --force \
             "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
             bot/ru-names
-          echo "::notice::Pushed data/lexicons/ru-names.tsv to bot/ru-names — open a PR from the GitHub UI."
+          echo "::notice::Pushed data/lexicons/ru-names.tsv.gz to bot/ru-names — open a PR from the GitHub UI."
