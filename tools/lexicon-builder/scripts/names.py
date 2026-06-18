@@ -134,13 +134,13 @@ def main() -> int:
         return 1
 
     def pick(parses, grammeme):
-        # Prefer the parse pymorphy recognises as this kind of name; fall back
-        # to the first noun parse so an unknown-but-declinable name still
-        # inflects rather than being dropped.
-        named = next((p for p in parses if grammeme in p.tag), None)
-        if named is not None:
-            return named
-        return next((p for p in parses if p.tag.POS == "NOUN"), None)
+        # Only emit forms pymorphy actually tags as this kind of name. An
+        # earlier NOUN fallback let unknown tokens through as guessed common
+        # nouns (wrong gender/animacy: Ивановаа, Ивановва) and pulled in
+        # non-name homographs (Ивановец the resident, Иваново the Geox place,
+        # an invented plural lemma Ивановичь) — so drop anything not tagged
+        # Name/Surn/Patr rather than inflect a wrong reading.
+        return next((p for p in parses if grammeme in p.tag), None)
 
     # (form, lemma) -> tags. The CASES order puts nomn first, so a syncretic
     # form (Иванова = gent & accs) keeps a single, deterministic tag.
