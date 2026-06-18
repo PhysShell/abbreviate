@@ -54,19 +54,22 @@ jobs:
       - name: Generate ru-names.tsv
         run: |
           set -euo pipefail
-          # Combined given names + the 2025-updated surname and patronymic
-          # lists. names.py reads plain or gzipped UTF-8 text and inflects each
-          # name through mawo-pymorphy3; the locator tolerates archive layout.
-          first=$(find mawo -name 'first_all_2025.dict' | head -1)
-          last=$(find mawo -name 'last_updated_2025.dict' | head -1)
-          middle=$(find mawo -name 'middle.dict' | head -1)
-          test -n "$first"  || { echo "::error::missing first_all_2025.dict";  exit 1; }
-          test -n "$last"   || { echo "::error::missing last_updated_2025.dict"; exit 1; }
-          test -n "$middle" || { echo "::error::missing middle.dict";           exit 1; }
+          # Feed BOTH the base lists (first/last/middle — these hold the bulk,
+          # ~95k surnames) and the small 2025 update deltas; names.py dedups by
+          # (form, lemma). The base dicts are the coverage; the *_2025 deltas
+          # only add a handful, so missing either is fine but base is essential.
+          args=()
+          while IFS= read -r f; do args+=(--first "$f"); done < <(
+            find mawo \( -name 'first.dict' -o -name 'first_all_2025.dict' \))
+          while IFS= read -r f; do args+=(--surname "$f"); done < <(
+            find mawo \( -name 'last.dict' -o -name 'last_updated_2025.dict' \))
+          while IFS= read -r f; do args+=(--patronymic "$f"); done < <(
+            find mawo -name 'middle.dict')
+          echo "names.py inputs: ${args[*]}"
+          test ${#args[@]} -gt 0 || { echo "::error::no name dicts found"; exit 1; }
           python3 tools/lexicon-builder/scripts/names.py \
-            --first "$first" --surname "$last" --patronymic "$middle" \
-            -o data/lexicons/ru-names.tsv
-          echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows:"
+            "${args[@]}" -o data/lexicons/ru-names.tsv
+          echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows, $(du -h data/lexicons/ru-names.tsv | cut -f1):"
           head -8 data/lexicons/ru-names.tsv
 
       # Always keep the artifact downloadable, even if the PR step is skipped.
