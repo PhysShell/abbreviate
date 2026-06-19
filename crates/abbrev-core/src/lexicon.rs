@@ -49,7 +49,20 @@ impl Lexicon {
     /// The grammeme `tags` column is optional (3-column lexicons load with
     /// empty tags). Empty lines and lines starting with `#` are skipped.
     pub fn from_tsv_str(tsv: &str) -> Result<Self, LexiconError> {
-        let mut entries = Vec::new();
+        let mut lex = Self::default();
+        lex.extend_from_tsv_str(tsv)?;
+        Ok(lex)
+    }
+
+    /// Parses more `form<TAB>lemma<TAB>freq[<TAB>tags]` rows and appends them,
+    /// returning the number added. Lets a host fold several sources into one
+    /// lexicon — e.g. the base `ru-50k` plus an opt-in names lexicon — without
+    /// the engine knowing about multiple files. No dedup: a name form that
+    /// coincides with a real word stays a separate entry (its own lemma), so
+    /// the ranker, not load order, decides which wins. Line numbers in errors
+    /// are relative to `tsv`.
+    pub fn extend_from_tsv_str(&mut self, tsv: &str) -> Result<usize, LexiconError> {
+        let before = self.entries.len();
         for (i, raw) in tsv.lines().enumerate() {
             let line = raw.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -77,14 +90,14 @@ impl Lexicon {
                 line: i + 1,
                 message: format!("bad frequency `{freq}`"),
             })?;
-            entries.push(LexiconEntry {
+            self.entries.push(LexiconEntry {
                 form: form.trim().to_string(),
                 lemma: lemma.trim().to_string(),
                 freq,
                 tags,
             });
         }
-        Ok(Self { entries })
+        Ok(self.entries.len() - before)
     }
 
     /// Small built-in lexicon for demos and tests. Real deployments load a
@@ -138,5 +151,31 @@ mod tests {
     #[test]
     fn demo_lexicon_loads() {
         assert!(Lexicon::demo().len() > 50);
+    }
+
+    #[test]
+    fn extend_appends_and_keeps_homographs() {
+        // Base word роман (the noun) plus an opt-in names source carrying the
+        // homograph Роман (the name): both coexist as separate entries, so the
+        // ranker decides — load order doesn't drop either.
+        let mut lex = Lexicon::from_tsv_str("роман\tроман\t310\tNOUN").unwrap();
+        let added = lex
+            .extend_from_tsv_str("# names\nРоман\tРоман\t1\tNOUN,Name\n")
+            .unwrap();
+        assert_eq!(added, 1);
+        assert_eq!(lex.len(), 2);
+        let forms: Vec<&str> = lex.iter().map(|(_, e)| e.form.as_str()).collect();
+        assert!(forms.contains(&"роман") && forms.contains(&"Роман"));
+    }
+
+    #[test]
+    fn extend_reports_source_relative_errors() {
+        let mut lex = Lexicon::from_tsv_str("привет\tпривет\t1").unwrap();
+        // First (and only) row of the appended source is malformed -> line 1.
+        let err = lex.extend_from_tsv_str("плохая_строка").unwrap_err();
+        assert_eq!(err.line, 1);
+        // The base lexicon is untouched on a failed extend's parsed prefix only
+        // up to the error; here nothing valid preceded, so len stays 1.
+        assert_eq!(lex.len(), 1);
     }
 }
