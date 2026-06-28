@@ -47,3 +47,9 @@ CC-BY-SA, токен-частоты OpenCorpora).
 * реранжирование частотой и контекстом (Sorokin/SpellRuEval, Chen–Lee, CHIME);
 * top-1/top-3/латентность/keystroke-savings как обязательные метрики;
 * приватный локальный лог принятий (ibus-typing-booster, lay-public).
+
+## Отдельные ветки исследования
+
+* [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md) — контекстный
+  recency-кэш («слово из этого разговора»): cache-LM/burstiness, OOV-достижимость,
+  per-app-скоуп. Развитие линии «Контекст» поверх биграмной LM.

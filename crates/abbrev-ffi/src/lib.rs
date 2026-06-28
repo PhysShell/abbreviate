@@ -283,6 +283,28 @@ impl AbbrevEngine {
             .reject(&input, &form);
     }
 
+    /// Notes a word the user committed in the current context, feeding the
+    /// ephemeral session recency cache: a freshly-used word floats up in
+    /// later rankings and decays as the conversation moves on. The shell
+    /// calls this once per committed word. The cache is in-memory only —
+    /// never persisted, never synced.
+    pub fn note_word(&self, word: String) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .note_word(&word);
+    }
+
+    /// Clears the session recency cache. The shell calls this when the
+    /// context changes (e.g. a different app/field), so recency never leaks
+    /// across contexts.
+    pub fn reset_session(&self) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .reset_session();
+    }
+
     /// Merges another device's history blob (sum of counters) for sync.
     pub fn merge_history(&self, blob: String) {
         self.inner
@@ -319,6 +341,27 @@ mod tests {
         engine.accept("првт".into(), "приват".into());
         let blob = engine.export_history();
         assert!(blob.contains("приват"));
+    }
+
+    #[test]
+    fn note_word_raises_recent_form_score() {
+        let engine = AbbrevEngine::with_demo_lexicon();
+        let score_of = |e: &AbbrevEngine| {
+            e.suggest("првт".into(), vec![], 5)
+                .into_iter()
+                .find(|s| s.form == "приват")
+                .map(|s| s.score)
+        };
+        let before = score_of(&engine).expect("приват is a candidate");
+        engine.note_word("приват".into());
+        let after = score_of(&engine).expect("приват is a candidate");
+        assert!(
+            after > before,
+            "recency must raise the score: {before} -> {after}"
+        );
+        // Resetting the context drops the boost back.
+        engine.reset_session();
+        assert_eq!(score_of(&engine), Some(before));
     }
 
     #[test]

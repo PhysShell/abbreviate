@@ -193,6 +193,20 @@ impl WasmEngine {
         self.inner.reject(input, form);
     }
 
+    /// Notes a word committed in the current context, feeding the ephemeral
+    /// session recency cache: a freshly-used word floats up in later rankings
+    /// and decays as the conversation moves on. Call once per committed word.
+    /// In-memory only — never persisted, never synced.
+    pub fn note_word(&mut self, word: &str) {
+        self.inner.note_word(word);
+    }
+
+    /// Clears the session recency cache (call on a context change, e.g. a
+    /// different field/app) so recency never leaks across contexts.
+    pub fn reset_session(&mut self) {
+        self.inner.reset_session();
+    }
+
     /// Merges another device's history blob (sum of counters) for sync.
     pub fn merge_history(&mut self, blob: &str) {
         self.inner.merge_history(blob);
@@ -216,6 +230,23 @@ mod tests {
         let engine = WasmEngine::new(None).unwrap();
         let json = engine.suggest_json("првт", "", 3);
         assert!(json.contains("привет"), "{json}");
+    }
+
+    #[test]
+    fn session_cache_changes_top_suggestion() {
+        // Close frequencies so the recency boost is decisive at limit 1
+        // (the demo's привет dominates приват on frequency alone, which would
+        // make the test pass even if note_word were a no-op).
+        let tsv = "привет\tпривет\t150\nприват\tприват\t100\n";
+        let mut engine = WasmEngine::new(Some(tsv.to_string())).unwrap();
+        // Baseline: frequency picks привет.
+        assert!(engine.suggest_json("првт", "", 1).contains("привет"));
+        // A noted word takes the top slot...
+        engine.note_word("приват");
+        assert!(engine.suggest_json("првт", "", 1).contains("приват"));
+        // ...and resetting the context restores the baseline.
+        engine.reset_session();
+        assert!(engine.suggest_json("првт", "", 1).contains("привет"));
     }
 
     #[test]

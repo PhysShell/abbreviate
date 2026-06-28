@@ -16,6 +16,7 @@ use crate::lexicon::{EntryId, Lexicon};
 use crate::morph;
 use crate::paradigm::{ParadigmGroup, Paradigms};
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
+use crate::recency::SessionCache;
 use crate::shortcuts::Shortcuts;
 
 /// Endings used to route an input like `тстрние` into the right
@@ -98,6 +99,7 @@ pub struct Engine {
     indexes: Indexes,
     by_lemma: HashMap<String, Vec<EntryId>>,
     history: UserHistory,
+    session: SessionCache,
     context_model: Box<dyn ContextModel>,
     shortcuts: Shortcuts,
     paradigms: Option<Paradigms>,
@@ -127,6 +129,7 @@ impl Engine {
             indexes,
             by_lemma,
             history: UserHistory::default(),
+            session: SessionCache::default(),
             context_model: Box::new(NoContext),
             shortcuts: Shortcuts::default(),
             paradigms: None,
@@ -268,6 +271,7 @@ impl Engine {
                 context: self.context_model.score(context, &entry.form, &entry.lemma),
                 user_prior: self.history.prior(&input_skeleton, &form_norm),
                 morph_compatibility: morph::compatibility(&prev_word, &entry.tags),
+                recency_prior: self.session.prior_normalized(&form_norm),
             };
             scored.push((score(&signals, &self.config.weights), id));
         }
@@ -390,6 +394,22 @@ impl Engine {
     pub fn reject(&mut self, input: &str, form: &str) {
         let input_skeleton = skeleton(&normalize(input.trim()));
         self.history.reject(&input_skeleton, &normalize(form));
+    }
+
+    /// Notes a word observed in the current context (a committed word, not
+    /// the in-progress input). Feeds the ephemeral session recency cache so
+    /// a freshly-used word floats up in subsequent rankings and decays as the
+    /// conversation moves on. The shell drives this stream (one call per
+    /// committed word); the cache is local and never persisted or synced.
+    pub fn note_word(&mut self, word: &str) {
+        self.session.note(word);
+    }
+
+    /// Clears the session recency cache — the shell calls this when the
+    /// context changes (e.g. a different app/field), so recency never leaks
+    /// across contexts.
+    pub fn reset_session(&mut self) {
+        self.session.reset();
     }
 
     /// History blob for the shell to persist (privacy stays shell-side).
@@ -661,6 +681,31 @@ mod tests {
         assert_eq!(with_ctx("в").as_deref(), Some("приват"));
         // No context: frequency wins as before.
         assert_eq!(e.suggest("првт", &Context::default(), 1)[0].form, "привет");
+    }
+
+    #[test]
+    fn recency_floats_a_session_word_then_decays() {
+        // Two forms share skeleton првт; frequency alone prefers привет.
+        let tsv = "привет\tпривет\t150\nприват\tприват\t100\n";
+        let mut e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
+        assert_eq!(top_forms(&e, "првт", 1), vec!["привет"]);
+        // A word used in this session floats to the top of the ambiguity.
+        e.note_word("приват");
+        assert_eq!(top_forms(&e, "првт", 1), vec!["приват"]);
+        // As the conversation moves on, the boost decays and frequency wins
+        // back; resetting the context (e.g. a new app) does it immediately.
+        e.reset_session();
+        assert_eq!(top_forms(&e, "првт", 1), vec!["привет"]);
+    }
+
+    #[test]
+    fn recency_normalizes_observed_word() {
+        // Shell may hand a capitalized / ё-spelled committed word; it must
+        // still match the normalized candidate form.
+        let tsv = "привет\tпривет\t150\nприват\tприват\t100\n";
+        let mut e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
+        e.note_word("ПРИВАТ");
+        assert_eq!(top_forms(&e, "првт", 1), vec!["приват"]);
     }
 
     #[test]
