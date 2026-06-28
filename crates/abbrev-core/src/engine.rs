@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::alphabet::{normalize, skeleton};
+use crate::alphabet::{is_plain_russian, normalize, skeleton};
 use crate::context::{Context, ContextModel, NoContext};
 use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
@@ -110,6 +110,38 @@ pub struct Engine {
 /// lexicon candidate, so a typed shorthand is always offered first.
 const SHORTCUT_SCORE: f32 = 1000.0;
 
+/// One ranked candidate from either source: a lexicon entry (by id) or an
+/// out-of-lexicon session word (a fully-built [`Suggestion`]). Merging the
+/// two as one sortable list lets a freshly-typed OOV word interleave with
+/// lexicon candidates by score, while the lexicon path stays untouched.
+enum Ranked {
+    Lexicon(f32, EntryId),
+    Oov(Suggestion),
+}
+
+impl Ranked {
+    fn score(&self) -> f32 {
+        match self {
+            Ranked::Lexicon(score, _) => *score,
+            Ranked::Oov(s) => s.score,
+        }
+    }
+
+    fn into_suggestion(self, lexicon: &Lexicon) -> Suggestion {
+        match self {
+            Ranked::Lexicon(score, id) => {
+                let entry = lexicon.get(id);
+                Suggestion {
+                    form: entry.form.clone(),
+                    lemma: entry.lemma.clone(),
+                    score,
+                }
+            }
+            Ranked::Oov(s) => s,
+        }
+    }
+}
+
 impl Engine {
     pub fn new(lexicon: Lexicon) -> Self {
         Self::with_config(lexicon, EngineConfig::default())
@@ -198,17 +230,13 @@ impl Engine {
             out.truncate(limit);
             return out;
         }
-        for (score, id) in self.scored(input, context, limit) {
+        for ranked in self.ranked(input, context, limit) {
             if out.len() >= limit {
                 break;
             }
-            let entry = self.lexicon.get(id);
-            if seen.insert(normalize(&entry.form)) {
-                out.push(Suggestion {
-                    form: entry.form.clone(),
-                    lemma: entry.lemma.clone(),
-                    score,
-                });
+            let suggestion = ranked.into_suggestion(&self.lexicon);
+            if seen.insert(normalize(&suggestion.form)) {
+                out.push(suggestion);
             }
         }
         out.truncate(limit);
@@ -280,6 +308,110 @@ impl Engine {
         scored
     }
 
+    /// Lexicon and out-of-lexicon candidates merged into one score-ordered
+    /// list. Lexicon entries lead ties (stable sort over a lexicon-first
+    /// vector), since they carry a lemma and corpus frequency.
+    fn ranked(&self, input: &str, context: &Context, limit: usize) -> Vec<Ranked> {
+        let mut out: Vec<Ranked> = self
+            .scored(input, context, limit)
+            .into_iter()
+            .map(|(score, id)| Ranked::Lexicon(score, id))
+            .collect();
+        out.extend(
+            self.oov_suggestions(input, context)
+                .into_iter()
+                .map(Ranked::Oov),
+        );
+        out.sort_by(|a, b| b.score().total_cmp(&a.score()));
+        out
+    }
+
+    /// Out-of-lexicon retrieval (Part 2): session words the user has typed
+    /// that are *not* in the lexicon, scored as candidates so a freshly-used
+    /// novel word (`синхрофазотрон`) is reachable from its abbreviation.
+    ///
+    /// Variant B — a parallel path producing `Suggestion`s directly, bypassing
+    /// the `EntryId` pipeline. An OOV word has no corpus frequency, lemma or
+    /// grammemes, so its float comes from `recency_prior` (and any user
+    /// history): present while the topic is live, sinking below lexicon words
+    /// as it decays. Words already in the lexicon are skipped here — the
+    /// lexicon path plus the recency signal already cover them.
+    fn oov_suggestions(&self, input: &str, context: &Context) -> Vec<Suggestion> {
+        if self.session.is_empty() {
+            return Vec::new();
+        }
+        let norm = normalize(input.trim());
+        let input_chars: Vec<char> = norm.chars().collect();
+        if input_chars.len() < self.config.min_input_len || !is_protected_safe(&norm) {
+            return Vec::new();
+        }
+        let input_skeleton = skeleton(&norm);
+        let skeleton_chars: Vec<char> = input_skeleton.chars().collect();
+        if skeleton_chars.is_empty() {
+            return Vec::new();
+        }
+        let cutoff = self.config.edit_cutoff_base
+            + self.config.edit_cutoff_per_char * input_chars.len() as f32;
+
+        let mut out: Vec<Suggestion> = Vec::new();
+        for word in self.session.words() {
+            // In-lexicon words are handled by the lexicon path (+recency).
+            if !self.indexes.by_form.exact(word.norm, 1).is_empty() {
+                continue;
+            }
+            // Graded stem agreement, same rule as the lexicon path. Gate the
+            // expensive edit-distance DP on a shared skeleton prefix: a word
+            // with no leading consonant in common is never an abbreviation of
+            // this input, and skipping it keeps the per-keystroke scan cheap.
+            let form_skeleton_chars: Vec<char> = word.skeleton.chars().collect();
+            let skeleton_match = if word.skeleton == input_skeleton {
+                1.0
+            } else {
+                common_prefix_len(&skeleton_chars, &form_skeleton_chars) as f32
+                    / skeleton_chars.len() as f32
+            };
+            if skeleton_match == 0.0 {
+                continue;
+            }
+            let form_chars: Vec<char> = word.norm.chars().collect();
+            let Some(distance) =
+                weighted_distance(&input_chars, &form_chars, &self.config.costs, cutoff)
+            else {
+                continue;
+            };
+            let signals = Signals {
+                skeleton_match,
+                suffix_compatibility: common_ending_len(&input_chars, &form_chars, 3) as f32 / 3.0,
+                prefix_agreement: common_prefix_len(&input_chars, &form_chars) as f32
+                    / input_chars.len() as f32,
+                edit_distance: distance,
+                // No corpus frequency / lemma / grammemes for an OOV word.
+                log_frequency: 0.0,
+                context: self
+                    .context_model
+                    .score(context, word.display, word.display),
+                user_prior: self.history.prior(&input_skeleton, word.norm),
+                morph_compatibility: 0.0,
+                recency_prior: word.recency_prior,
+            };
+            out.push(Suggestion {
+                form: word.display.to_string(),
+                lemma: word.display.to_string(),
+                score: score(&signals, &self.config.weights),
+            });
+        }
+        // Deterministic order: `words()` iterates a HashMap, so ties must be
+        // broken on a stable key. Sorting here (score desc, then form) plus
+        // the stable merge in `ranked` keeps identical inputs producing
+        // identical top-N — the engine's determinism invariant.
+        out.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.form.cmp(&b.form))
+        });
+        out
+    }
+
     /// Two-level suggestions: one group per lemma, in ranking order.
     /// The strip renders `best` per group; hold expands `variants`.
     pub fn suggest_grouped(
@@ -320,21 +452,34 @@ impl Engine {
                 return groups;
             }
         }
-        for (score, id) in self.scored(input, context, limit) {
-            let entry = self.lexicon.get(id);
-            if !seen_lemmas.insert(normalize(&entry.lemma)) {
-                continue;
-            }
-            let best = Suggestion {
-                form: entry.form.clone(),
-                lemma: entry.lemma.clone(),
-                score,
+        for ranked in self.ranked(input, context, limit) {
+            let (best, variants) = match ranked {
+                Ranked::Lexicon(score, id) => {
+                    let entry = self.lexicon.get(id);
+                    if !seen_lemmas.insert(normalize(&entry.lemma)) {
+                        continue;
+                    }
+                    let best = Suggestion {
+                        form: entry.form.clone(),
+                        lemma: entry.lemma.clone(),
+                        score,
+                    };
+                    let variants = self
+                        .forms_of_lemma(&entry.lemma)
+                        .into_iter()
+                        .filter(|form| *form != best.form)
+                        .collect();
+                    (best, variants)
+                }
+                // An OOV word is its own lemma with no sibling forms (no
+                // paradigm); it gets a single-form group.
+                Ranked::Oov(best) => {
+                    if !seen_lemmas.insert(normalize(&best.lemma)) {
+                        continue;
+                    }
+                    (best, Vec::new())
+                }
             };
-            let variants = self
-                .forms_of_lemma(&entry.lemma)
-                .into_iter()
-                .filter(|form| *form != best.form)
-                .collect();
             groups.push(SuggestionGroup {
                 lemma: best.lemma.clone(),
                 best,
@@ -528,9 +673,10 @@ impl Engine {
 
 /// "Если не уверен — не трогай": the engine only ever reasons about plain
 /// Russian words. Numbers, Latin, identifiers, e-mails and URLs are the
-/// user's business.
+/// user's business. Shared with the session cache (a learned OOV word is
+/// held to the same bar as typed input — see `SessionCache::note`).
 fn is_protected_safe(norm: &str) -> bool {
-    norm.chars().all(|c| matches!(c, 'а'..='я' | 'ё' | '-'))
+    is_plain_russian(norm)
 }
 
 #[cfg(test)]
@@ -706,6 +852,93 @@ mod tests {
         let mut e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
         e.note_word("ПРИВАТ");
         assert_eq!(top_forms(&e, "првт", 1), vec!["приват"]);
+    }
+
+    #[test]
+    fn oov_word_is_reachable_after_note() {
+        // "синхрофазотрон" is not in the demo lexicon, so its abbreviation
+        // finds nothing — until the user types it once.
+        let mut e = engine();
+        assert!(
+            !top_forms(&e, "снхрфзтрн", 5)
+                .iter()
+                .any(|f| f == "синхрофазотрон"),
+            "unreachable before note"
+        );
+        e.note_word("синхрофазотрон");
+        assert_eq!(
+            top_forms(&e, "снхрфзтрн", 5).first().map(String::as_str),
+            Some("синхрофазотрон"),
+            "a freshly-typed OOV word is reachable from its skeleton"
+        );
+        // Clearing the session context drops it again.
+        e.reset_session();
+        assert!(
+            !top_forms(&e, "снхрфзтрн", 5)
+                .iter()
+                .any(|f| f == "синхрофазотрон"),
+            "unreachable after reset"
+        );
+    }
+
+    #[test]
+    fn oov_word_preserves_display_spelling() {
+        // The inserted form keeps the user's capitalization, not the
+        // normalized matching key.
+        let mut e = engine();
+        e.note_word("Синхрофазотрон");
+        assert_eq!(
+            top_forms(&e, "снхрфзтрн", 1),
+            vec!["Синхрофазотрон"],
+            "display spelling is restored on the suggestion"
+        );
+    }
+
+    #[test]
+    fn in_lexicon_word_is_not_duplicated_by_oov() {
+        // Noting an in-lexicon word must not also surface it via the OOV path:
+        // it stays a single, lemma-grouped candidate (boosted by recency).
+        let mut e = engine();
+        e.note_word("привет");
+        let count = top_forms(&e, "првт", 5)
+            .iter()
+            .filter(|f| *f == "привет")
+            .count();
+        assert_eq!(count, 1, "привет must appear exactly once");
+    }
+
+    #[test]
+    fn oov_word_forms_its_own_group() {
+        let mut e = engine();
+        e.note_word("синхрофазотрон");
+        let groups = e.suggest_grouped("снхрфзтрн", &Context::default(), 5);
+        let group = groups
+            .iter()
+            .find(|g| g.lemma == "синхрофазотрон")
+            .expect("OOV word is a group");
+        assert_eq!(group.best.form, "синхрофазотрон");
+        assert!(
+            group.variants.is_empty(),
+            "an OOV word has no sibling forms"
+        );
+    }
+
+    #[test]
+    fn oov_path_respects_protected_input() {
+        // A non-word token handed to note_word (digit/punctuation) must never
+        // be surfaced as an OOV suggestion — same protected-input rule as the
+        // input side, so a clean abbreviation can't leak пароль1.
+        let mut e = engine();
+        e.note_word("пароль1");
+        e.note_word("привет!");
+        assert!(
+            e.suggest("прль", &Context::default(), 5).is_empty(),
+            "digit-bearing token must not be surfaced"
+        );
+        assert!(
+            !top_forms(&e, "првт", 5).iter().any(|f| f == "привет!"),
+            "punctuation token must not be surfaced"
+        );
     }
 
     #[test]
