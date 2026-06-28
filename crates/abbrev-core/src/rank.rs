@@ -10,11 +10,16 @@
 //! + w_ctx   * context_lm_score
 //! + w_user  * user_history_prior
 //! + w_morph * morph_compatibility
+//! + w_rec   * recency_prior
 //! ```
 //!
 //! `morph_compatibility` is case agreement with a preceding preposition
 //! (`в работе`, not `в работу`), available once the lexicon carries
 //! grammemes; it is a soft, never-negative boost.
+//!
+//! `recency_prior` is the in-document burstiness signal: a word used in the
+//! current session decays from `1.0` toward `0.0` as the topic moves on
+//! ([`crate::recency`]); it is also soft and never-negative.
 
 /// Weights of the linear ranking model. Tuned on the offline benchmark
 /// (`abbrev-cli bench`), not by intuition.
@@ -32,6 +37,9 @@ pub struct Weights {
     /// Reward for grammatical case agreement with the left context
     /// (preposition government).
     pub morph: f32,
+    /// Reward for a candidate used recently in the current session
+    /// (in-document burstiness / cache LM).
+    pub recency: f32,
 }
 
 impl Default for Weights {
@@ -47,6 +55,7 @@ impl Default for Weights {
             context: 1.0,
             user: 1.0,
             morph: 1.0,
+            recency: 1.0,
         }
     }
 }
@@ -75,6 +84,8 @@ pub struct Signals {
     pub user_prior: f32,
     /// Case agreement with the preceding preposition (0.0 or 1.0).
     pub morph_compatibility: f32,
+    /// Session recency prior in [0, 1] (1.0 just-used, decays to 0.0).
+    pub recency_prior: f32,
 }
 
 pub fn score(signals: &Signals, w: &Weights) -> f32 {
@@ -86,6 +97,7 @@ pub fn score(signals: &Signals, w: &Weights) -> f32 {
         + w.context * signals.context
         + w.user * signals.user_prior
         + w.morph * signals.morph_compatibility
+        + w.recency * signals.recency_prior
 }
 
 /// Longest common prefix of two char slices.
@@ -119,6 +131,7 @@ mod tests {
             context: 0.0,
             user_prior: 0.0,
             morph_compatibility: 0.0,
+            recency_prior: 0.0,
         };
         let frequent = Signals {
             log_frequency: 5.0,

@@ -34,6 +34,7 @@ pub mod morph;
 pub mod ngram;
 pub mod paradigm;
 pub mod rank;
+pub mod recency;
 pub mod shortcuts;
 
 pub use context::{Context, ContextModel, NoContext};
@@ -43,4 +44,5 @@ pub use lexicon::{Lexicon, LexiconEntry, LexiconError};
 pub use ngram::{BigramModel, LmError};
 pub use paradigm::{CaseForm, Gender, Number, ParadigmGroup, Paradigms};
 pub use rank::Weights;
+pub use recency::SessionCache;
 pub use shortcuts::{ShortcutError, Shortcuts};

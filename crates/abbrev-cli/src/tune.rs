@@ -141,6 +141,7 @@ fn jittered(base: &Weights, rng: &mut Rng, amount: f64) -> Weights {
         context: (base.context * rng.jitter(amount)).max(0.0),
         user: (base.user * rng.jitter(amount)).max(0.0),
         morph: (base.morph * rng.jitter(amount)).max(0.0),
+        recency: (base.recency * rng.jitter(amount)).max(0.0),
     }
 }
 
@@ -237,8 +238,8 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
     };
 
     println!(
-        "\nweights: skeleton={:.3} suffix={:.3} prefix={:.3} edit={:.3} freq={:.3} context={:.3} user={:.3}",
-        best.skeleton, best.suffix, best.prefix, best.edit, best.freq, best.context, best.user
+        "\nweights: skeleton={:.3} suffix={:.3} prefix={:.3} edit={:.3} freq={:.3} context={:.3} user={:.3} morph={:.3} recency={:.3}",
+        best.skeleton, best.suffix, best.prefix, best.edit, best.freq, best.context, best.user, best.morph, best.recency
     );
     if adopt {
         println!("verdict: ADOPT — {report} objective improves beyond the margin.");

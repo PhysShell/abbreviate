@@ -154,7 +154,7 @@ docs/
 ```text
 score = w_skel·skeleton_match + w_suf·suffix_compat + w_pref·prefix_agreement
       − w_edit·edit_distance + w_freq·ln(1+ipm) + w_ctx·context_lm
-      + w_user·user_prior + w_morph·morph_compatibility
+      + w_user·user_prior + w_morph·morph_compatibility + w_rec·recency_prior
 ```
 
 * `skeleton_match` — градуированный: точное совпадение скелетов = 1.0, иначе
@@ -183,6 +183,16 @@ score = w_skel·skeleton_match + w_suf·suffix_compat + w_pref·prefix_agreement
   пара тонет. Всё суммируемо (CRDT-friendly): `merge` сводит устройства
   сложением — база будущего синка. Сериализация в TSV-блоб, хранение — на стороне
   оболочки.
+* **Recency-кэш** (`w_recency`, `recency::SessionCache`) — внутридокументная
+  burstiness: слово, употреблённое в текущей сессии, всплывает в подсказках и
+  затухает по мере ухода темы. Эфемерный сигнал в `[0,1]`, затухание по
+  **логическому тику** (числу виденных слов), а не по часам — ядро sans-IO
+  остаётся детерминированным. Оболочка кормит кэш `note_word` на каждое
+  закоммиченное слово и зовёт `reset_session` при смене контекста (приложения/
+  поля). Кэш локален и эфемерен: в синк (`merge`) не идёт — приватность
+  бесплатно. Комплементарен LM: та ловит корпусные ассоциации, recency —
+  повтор в этом разговоре и новые слова. Полный разбор и Части 2 (OOV-ретривал)
+  / 3 (per-app-скоуп) — в [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md).
 * **Морфологический сигнал** (`w_morph`, `morph::compatibility`) — согласование
   падежа: лексикон несёт 4-ю колонку с граммемами OpenCorpora (офлайн pymorphy3),
   движок читает из них падеж формы и сверяет с падежом, который управляется
@@ -354,7 +364,11 @@ proptest как dev-dependency — в рантайм не попадает, ADR-
 3. **Android MVP** — оболочка IME, загрузка лексикона из assets, персистентная
    история, настройки.
 4. ~~**Контекст**~~ — сделано: биграмная LM за `ContextModel`
-   (+13пп top-1 на контекстном бенчмарке); дальше — нейрореранкер.
+   (+13пп top-1 на контекстном бенчмарке) и **recency-кэш** (`w_recency`,
+   `SessionCache`, Часть 1 — сигнал ранжирования; FFI/WASM `note_word`/
+   `reset_session`). Дальше: Части 2 (OOV-ретривал) и 3 (per-app-скоуп) из
+   [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md), нейрореранкер,
+   recency-срез в `abbrev gen`.
 5. ~~**Морфология**~~ — сделано (первый слой): граммемы OpenCorpora в 4-й
    колонке лексикона, сигнал `w_morph` = согласование падежа с управляющим
    предлогом (+23пп top-1 на падежном бенчмарке). Дальше — полные парадигмы,
