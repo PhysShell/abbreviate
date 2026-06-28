@@ -39,12 +39,15 @@ pub fn skeleton(s: &str) -> String {
 }
 
 /// Whether `s` is a plain Russian word — the engine's "если не уверен — не
-/// трогай" predicate. Russian letters with at most *internal* single hyphens
-/// (`кто-то`); digits, Latin, punctuation or symbols (`пароль1`, `привет!`, a
-/// URL) make it a non-word the engine must not reason about, neither as input
-/// nor as a learned session word. A leading/trailing/doubled hyphen or a
-/// hyphen-only string (`-`, `--`, `слово-`) is rejected too. An empty string
-/// is vacuously plain (callers guard length separately).
+/// трогай" predicate. Russian letters with *internal* hyphens (`кто-то`, and
+/// genuinely multi-hyphen words like `мать-и-мачеха`, `иван-да-марья`); digits,
+/// Latin, punctuation or symbols (`пароль1`, `привет!`, a URL) make it a
+/// non-word the engine must not reason about, neither as input nor as a learned
+/// session word. A leading/trailing/doubled hyphen or a hyphen-only string
+/// (`-`, `--`, `слово-`) is rejected. An empty string is vacuously plain
+/// (callers guard length separately). The hyphen count is deliberately not
+/// capped — a hyphen only ever appears between letters, so the shape stays
+/// word-like, and capping would reject real Russian compounds.
 pub fn is_plain_russian(s: &str) -> bool {
     let mut prev_hyphen = false;
     let mut seen_letter = false;
@@ -112,7 +115,16 @@ mod tests {
 
     #[test]
     fn plain_russian_allows_only_internal_hyphens() {
-        for w in ["привет", "кто-то", "что-нибудь", "ёж", ""] {
+        for w in [
+            "привет",
+            "кто-то",
+            "что-нибудь",
+            // Genuine multi-hyphen Russian words — must NOT be rejected.
+            "мать-и-мачеха",
+            "иван-да-марья",
+            "ёж",
+            "",
+        ] {
             assert!(is_plain_russian(w), "{w:?} should be plain");
         }
         for w in [
