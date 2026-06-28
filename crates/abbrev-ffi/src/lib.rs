@@ -355,7 +355,10 @@ mod tests {
         let before = score_of(&engine).expect("приват is a candidate");
         engine.note_word("приват".into());
         let after = score_of(&engine).expect("приват is a candidate");
-        assert!(after > before, "recency must raise the score: {before} -> {after}");
+        assert!(
+            after > before,
+            "recency must raise the score: {before} -> {after}"
+        );
         // Resetting the context drops the boost back.
         engine.reset_session();
         assert_eq!(score_of(&engine), Some(before));
