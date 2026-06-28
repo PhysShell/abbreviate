@@ -38,6 +38,15 @@ pub fn skeleton(s: &str) -> String {
     s.chars().filter(|&c| !is_vowel(c) && !is_sign(c)).collect()
 }
 
+/// Whether every char is a plain Russian letter (or an internal hyphen):
+/// the engine's "если не уверен — не трогай" predicate. Anything with
+/// digits, Latin, punctuation or symbols (`пароль1`, `привет!`, a URL) is
+/// not a word the engine should reason about — neither as input nor as a
+/// learned session word. An empty string is vacuously plain.
+pub fn is_plain_russian(s: &str) -> bool {
+    s.chars().all(|c| matches!(c, 'а'..='я' | 'ё' | '-'))
+}
+
 /// ЙЦУКЕН layout rows used for adjacency checks.
 const ROWS: [&str; 3] = ["йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю"];
 

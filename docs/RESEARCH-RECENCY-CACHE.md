@@ -325,8 +325,8 @@ substring-фильтр зацензурит невинное («застраху
 2. ~~Часть 2 (B): параллельный merge OOV в `suggest`/`suggest_grouped`~~ —
    **сделано**: `SessionCache.words()` + `Engine::oov_suggestions` + `enum Ranked`,
    OOV-приор плавает на `recency` (freq=0), как у имён. Без новой FFI/WASM-поверхности.
-3. Проводка оболочки: `note_word`/`reset` через FFI/WASM (уже есть с #23); per-app
-   ключ и момент `reset` — на стороне Android-оболочки (Часть 3).
+3. Проводка оболочки: `note_word`/`reset_session` через FFI/WASM (уже есть с #23);
+   per-app ключ и момент `reset_session` — на стороне Android-оболочки (Часть 3).
 
 Встаёт в дорожную карту ARCHITECTURE.md как развитие пункта 4 («Контекст»):
 после биграмной LM — рядом с ней, не вместо. LM ловит корпусные ассоциации,

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::alphabet::{normalize, skeleton};
+use crate::alphabet::{is_plain_russian, normalize, skeleton};
 use crate::context::{Context, ContextModel, NoContext};
 use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
@@ -400,6 +400,15 @@ impl Engine {
                 score: score(&signals, &self.config.weights),
             });
         }
+        // Deterministic order: `words()` iterates a HashMap, so ties must be
+        // broken on a stable key. Sorting here (score desc, then form) plus
+        // the stable merge in `ranked` keeps identical inputs producing
+        // identical top-N — the engine's determinism invariant.
+        out.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.form.cmp(&b.form))
+        });
         out
     }
 
@@ -664,9 +673,10 @@ impl Engine {
 
 /// "Если не уверен — не трогай": the engine only ever reasons about plain
 /// Russian words. Numbers, Latin, identifiers, e-mails and URLs are the
-/// user's business.
+/// user's business. Shared with the session cache (a learned OOV word is
+/// held to the same bar as typed input — see `SessionCache::note`).
 fn is_protected_safe(norm: &str) -> bool {
-    norm.chars().all(|c| matches!(c, 'а'..='я' | 'ё' | '-'))
+    is_plain_russian(norm)
 }
 
 #[cfg(test)]
@@ -910,6 +920,24 @@ mod tests {
         assert!(
             group.variants.is_empty(),
             "an OOV word has no sibling forms"
+        );
+    }
+
+    #[test]
+    fn oov_path_respects_protected_input() {
+        // A non-word token handed to note_word (digit/punctuation) must never
+        // be surfaced as an OOV suggestion — same protected-input rule as the
+        // input side, so a clean abbreviation can't leak пароль1.
+        let mut e = engine();
+        e.note_word("пароль1");
+        e.note_word("привет!");
+        assert!(
+            e.suggest("прль", &Context::default(), 5).is_empty(),
+            "digit-bearing token must not be surfaced"
+        );
+        assert!(
+            !top_forms(&e, "првт", 5).iter().any(|f| f == "привет!"),
+            "punctuation token must not be surfaced"
         );
     }
 

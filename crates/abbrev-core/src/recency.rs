@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use crate::alphabet::{normalize, skeleton};
+use crate::alphabet::{is_plain_russian, normalize, skeleton};
 
 /// Default half-life of the recency boost, in *words observed*. A form's
 /// prior halves every `half_life` words typed since it was last seen.
@@ -97,7 +97,12 @@ impl SessionCache {
     pub fn note(&mut self, word: &str) {
         let trimmed = word.trim();
         let key = normalize(trimmed);
-        if key.is_empty() {
+        // Hold a learned word to the same bar as typed input: only plain
+        // Russian words. A non-word token from the shell's tokenizer
+        // (`пароль1`, `привет!`) must neither be stored nor later surfaced as
+        // an OOV suggestion — same "если не уверен — не трогай" rule, and a
+        // privacy bonus (digit/identifier-bearing tokens are not retained).
+        if key.is_empty() || !is_plain_russian(&key) {
             return;
         }
         self.tick += 1;
@@ -240,13 +245,25 @@ mod tests {
         assert_eq!(w.recency_prior, 1.0); // just observed
     }
 
+    /// Unique plain-Russian word for index `i` (digits would be rejected by
+    /// `note` as non-words): each decimal digit maps to a distinct Cyrillic
+    /// letter, so distinct `i` give distinct, all-letter words.
+    fn ru_word(i: usize) -> String {
+        const D: [char; 10] = ['а', 'б', 'в', 'г', 'д', 'е', 'ж', 'з', 'и', 'к'];
+        let mut s = String::from("сл");
+        for ch in i.to_string().chars() {
+            s.push(D[ch as usize - '0' as usize]);
+        }
+        s
+    }
+
     #[test]
     fn long_session_evicts_stale_entries() {
         let mut c = SessionCache::with_half_life(4.0);
         let horizon = (4.0 * PRUNE_HALF_LIVES).ceil() as usize;
         // Far more unique words than the horizon: memory must stay bounded.
         for i in 0..10_000 {
-            c.note(&format!("слово{i}"));
+            c.note(&ru_word(i));
         }
         assert!(
             c.last_seen.len() <= 2 * horizon,
@@ -254,8 +271,8 @@ mod tests {
             c.last_seen.len()
         );
         // A long-evicted word reads as neutral; a recent one still boosts.
-        assert_eq!(c.prior("слово0"), 0.0);
-        assert!(c.prior("слово9999") > 0.9);
+        assert_eq!(c.prior(&ru_word(0)), 0.0);
+        assert!(c.prior(&ru_word(9999)) > 0.9);
     }
 
     #[test]
@@ -263,6 +280,21 @@ mod tests {
         let mut c = SessionCache::default();
         c.note("   ");
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn non_plain_russian_word_is_not_stored() {
+        // A non-word token (digit/punctuation/Latin) must not be retained:
+        // it would otherwise leak into OOV suggestions and bypass the
+        // protected-input rule.
+        let mut c = SessionCache::default();
+        for token in ["пароль1", "привет!", "api_key", "test@mail.ru", "x21"] {
+            c.note(token);
+        }
+        assert!(c.is_empty());
+        // A plain Russian word (hyphen allowed) is still stored.
+        c.note("кто-то");
+        assert_eq!(c.words().count(), 1);
     }
 
     #[test]
