@@ -4,8 +4,13 @@
 //! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped] [--paradigms hold.tsv]
 //! abbrev repl [--lexicon path.tsv]
 //! abbrev bench data/bench/basic.tsv [--lexicon path.tsv] [--errors fails.tsv]
+//! abbrev bench cases.tsv --recency [--noise N] [--lexicon path.tsv]
 //! abbrev gen --lexicon path.tsv --count 20000 --seed 42 -o cases.tsv
 //! ```
+//!
+//! `bench --recency` runs every case cold (empty session) vs warm
+//! (`note_word(expected)` then `--noise N` distractors) and reports the
+//! cold→warm top-1/top-3 lift — the measurement behind tuning `w_recency`.
 
 mod generate;
 mod snapshot;
@@ -267,23 +272,44 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
     const FLAT_K: usize = 10;
     const GROUPS: usize = 3;
     let mut errors_path: Option<String> = None;
+    let mut recency = false;
+    let mut noise = 0usize;
+    let mut noise_given = false;
     let mut rest: Vec<&str> = Vec::new();
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
-        if arg == "--errors" {
-            errors_path = it.next().map(String::from);
-        } else {
-            rest.push(arg);
+        match arg {
+            "--errors" => errors_path = it.next().map(String::from),
+            // Recency slice: measure the session-cache lift (Parts 1+2) by
+            // running each case cold vs warm. `--noise N` ages the prior.
+            "--recency" => recency = true,
+            "--noise" => match it.next().and_then(|v| v.parse().ok()) {
+                Some(v) => {
+                    noise = v;
+                    noise_given = true;
+                }
+                None => return fail("--noise needs a number"),
+            },
+            other => rest.push(other),
         }
+    }
+    // `--noise` only means something in the recency slice; in the normal path
+    // it would be silently ignored, so reject it instead of reporting the
+    // wrong mode's metrics.
+    if noise_given && !recency {
+        return fail("--noise requires --recency");
     }
     let opts = match parse_opts(rest) {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let Some(path) = opts.positional.first() else {
+    let Some(path) = opts.positional.first().cloned() else {
         return fail("bench needs a cases file: `abbrev bench data/bench/basic.tsv`");
     };
-    let cases = match std::fs::read_to_string(path) {
+    if recency {
+        return run_recency(opts, &path, noise);
+    }
+    let cases = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
@@ -406,6 +432,142 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Cold-vs-warm counters for the recency slice.
+#[derive(Default)]
+struct RecencyMetrics {
+    total: u32,
+    cold_top1: u32,
+    cold_top3: u32,
+    warm_top1: u32,
+    warm_top3: u32,
+}
+
+/// Runs each `(input, expected, context)` case twice on the same engine:
+/// **cold** (empty session) and **warm** (the session primed with
+/// `note_word(expected)` followed by `noise` distractor words, so the prior has
+/// aged `noise` words). The cold→warm delta is the recency lift — for an
+/// in-lexicon `expected` it is the ranking boost (Part 1); for an OOV `expected`
+/// cold is unreachable and warm measures retrieval (Part 2). The per-case
+/// context (4th bench column / `--context`) is honored so the slice is measured
+/// under the same ranking model as the normal bench. Deterministic: distractors
+/// are drawn in lexicon order via a rolling cursor.
+fn recency_eval(
+    engine: &mut Engine,
+    cases: &[(String, String, Context)],
+    noise: usize,
+    distractors: &[String],
+) -> RecencyMetrics {
+    const K: usize = 10;
+    let mut m = RecencyMetrics::default();
+    let mut cursor = 0usize;
+    for (input, expected, ctx) in cases {
+        m.total += 1;
+
+        engine.reset_session();
+        let cold = engine.suggest(input, ctx, K);
+        let cold_rank = cold.iter().position(|s| &s.form == expected);
+        if cold_rank == Some(0) {
+            m.cold_top1 += 1;
+        }
+        if cold_rank.is_some_and(|r| r < 3) {
+            m.cold_top3 += 1;
+        }
+
+        engine.reset_session();
+        engine.note_word(expected);
+        // Distractors are normalized (like the pool), so compare against the
+        // normalized target key — a ё/case variant must still count as the
+        // target and be skipped, not re-noted as noise.
+        let target_norm = abbrev_core::alphabet::normalize(expected);
+        let mut added = 0;
+        // Age the prior by `noise` distractors (skip ones equal to the target).
+        // `since_add` bounds a full no-progress pass: if a whole cycle of the
+        // pool yields no usable distractor (every entry equals the target),
+        // stop instead of looping forever.
+        let mut since_add = 0;
+        while added < noise && !distractors.is_empty() && since_add < distractors.len() {
+            let d = &distractors[cursor % distractors.len()];
+            cursor += 1;
+            if d != &target_norm {
+                engine.note_word(d);
+                added += 1;
+                since_add = 0;
+            } else {
+                since_add += 1;
+            }
+        }
+        let warm = engine.suggest(input, ctx, K);
+        let warm_rank = warm.iter().position(|s| &s.form == expected);
+        if warm_rank == Some(0) {
+            m.warm_top1 += 1;
+        }
+        if warm_rank.is_some_and(|r| r < 3) {
+            m.warm_top3 += 1;
+        }
+    }
+    m
+}
+
+/// `abbrev bench <cases> --recency [--noise N]`: reports the session-cache
+/// lift (cold vs warm top-1/top-3) so `w_recency` can be tuned against a real
+/// measurement. Works on any `abbrev gen` output.
+fn run_recency(opts: CommonOpts, path: &str, noise: usize) -> ExitCode {
+    let text = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => return fail(&format!("cannot read {path}: {e}")),
+    };
+    let mut cases: Vec<(String, String, Context)> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut f = line.split('\t');
+        let (Some(input), Some(expected)) = (f.next(), f.next()) else {
+            return fail(&format!("bad bench line (need input\\texpected): {line}"));
+        };
+        let _tag = f.next();
+        // 4th column is the per-case left context (as in the normal bench);
+        // fall back to the global --context so --lm is measured fairly.
+        let context = f
+            .next()
+            .map(|words| Context::new(words.split_whitespace().map(String::from).collect()))
+            .unwrap_or_else(|| opts.context.clone());
+        cases.push((input.to_string(), expected.to_string(), context));
+    }
+    if cases.is_empty() {
+        return fail("no cases found");
+    }
+    let mut engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
+    // Distractor pool: normalized lexicon forms, collected before the mutable
+    // borrow of the engine in `recency_eval`.
+    let distractors: Vec<String> = engine
+        .lexicon()
+        .iter()
+        .map(|(_, e)| abbrev_core::alphabet::normalize(&e.form))
+        .collect();
+    let m = recency_eval(&mut engine, &cases, noise, &distractors);
+
+    let pct = |x: u32| 100.0 * f64::from(x) / f64::from(m.total.max(1));
+    println!("recency slice (noise={noise}, cases={}):", m.total);
+    println!(
+        "  cold  top-1 {:.1}%  top-3 {:.1}%",
+        pct(m.cold_top1),
+        pct(m.cold_top3)
+    );
+    println!(
+        "  warm  top-1 {:.1}%  top-3 {:.1}%",
+        pct(m.warm_top1),
+        pct(m.warm_top3)
+    );
+    println!(
+        "  lift  top-1 {:+.1}pp  top-3 {:+.1}pp",
+        pct(m.warm_top1) - pct(m.cold_top1),
+        pct(m.warm_top3) - pct(m.cold_top3),
+    );
+    ExitCode::SUCCESS
+}
+
 /// Fraction of keystrokes saved by accepting `expected` after typing
 /// `input`, in chars, clamped to [0, 1].
 fn keystroke_savings(input: &str, expected: &str) -> f64 {
@@ -420,4 +582,52 @@ fn keystroke_savings(input: &str, expected: &str) -> f64 {
 fn fail(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recency_eval_reports_warm_lift() {
+        // Close frequencies so the boost is decisive at top-1 (the demo's
+        // привет dominates приват on frequency alone).
+        let lexicon = Lexicon::from_tsv_str("привет\tпривет\t150\nприват\tприват\t100\n").unwrap();
+        let mut engine = Engine::new(lexicon);
+        let cases = vec![("првт".to_string(), "приват".to_string(), Context::default())];
+        let m = recency_eval(&mut engine, &cases, 0, &[]);
+        // Cold: frequency picks привет, so приват is not top-1.
+        assert_eq!(m.cold_top1, 0);
+        // Warm: noting приват floats it to the top — the measured lift.
+        assert_eq!(m.warm_top1, 1);
+        assert_eq!(m.total, 1);
+    }
+
+    #[test]
+    fn recency_eval_consumes_distractors_with_wraparound() {
+        // noise (10) exceeds the distractor pool (2): the cursor must wrap
+        // without panicking. The distractors are out-of-lexicon and don't
+        // share приват's skeleton, so they don't compete — приват stays
+        // reachable in top-3 both cold and warm.
+        let lexicon = Lexicon::from_tsv_str("привет\tпривет\t150\nприват\tприват\t100\n").unwrap();
+        let mut engine = Engine::new(lexicon);
+        let cases = vec![("првт".to_string(), "приват".to_string(), Context::default())];
+        let distractors = vec!["солнце".to_string(), "ветер".to_string()];
+        let m = recency_eval(&mut engine, &cases, 10, &distractors);
+        assert_eq!(m.total, 1);
+        assert_eq!(m.cold_top3, 1);
+        assert_eq!(m.warm_top3, 1);
+    }
+
+    #[test]
+    fn recency_eval_terminates_when_all_distractors_are_the_target() {
+        // Pathological pool: every distractor equals the target, so none is
+        // usable. The no-progress guard must stop the loop instead of hanging.
+        let lexicon = Lexicon::from_tsv_str("привет\tпривет\t150\nприват\tприват\t100\n").unwrap();
+        let mut engine = Engine::new(lexicon);
+        let cases = vec![("првт".to_string(), "приват".to_string(), Context::default())];
+        let distractors = vec!["приват".to_string(), "приват".to_string()];
+        let m = recency_eval(&mut engine, &cases, 5, &distractors);
+        assert_eq!(m.total, 1); // completes
+    }
 }
