@@ -191,8 +191,11 @@ score = w_skel·skeleton_match + w_suf·suffix_compat + w_pref·prefix_agreement
   закоммиченное слово и зовёт `reset_session` при смене контекста (приложения/
   поля). Кэш локален и эфемерен: в синк (`merge`) не идёт — приватность
   бесплатно. Комплементарен LM: та ловит корпусные ассоциации, recency —
-  повтор в этом разговоре и новые слова. Полный разбор и Части 2 (OOV-ретривал)
-  / 3 (per-app-скоуп) — в [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md).
+  повтор в этом разговоре и новые слова. Из того же кэша растёт **OOV-ретривал**
+  (`Engine::oov_suggestions`, `enum Ranked`): набранные слова вне лексикона
+  (`синхрофазотрон`) достаются из сессионного словаря по скелету и мержатся с
+  лексиконными кандидатами по score, не трогая `EntryId`-конвейер. Полный разбор
+  и Часть 3 (per-app-скоуп) — в [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md).
 * **Морфологический сигнал** (`w_morph`, `morph::compatibility`) — согласование
   падежа: лексикон несёт 4-ю колонку с граммемами OpenCorpora (офлайн pymorphy3),
   движок читает из них падеж формы и сверяет с падежом, который управляется
@@ -366,7 +369,9 @@ proptest как dev-dependency — в рантайм не попадает, ADR-
 4. ~~**Контекст**~~ — сделано: биграмная LM за `ContextModel`
    (+13пп top-1 на контекстном бенчмарке) и **recency-кэш** (`w_recency`,
    `SessionCache`, Часть 1 — сигнал ранжирования; FFI/WASM `note_word`/
-   `reset_session`). Дальше: Части 2 (OOV-ретривал) и 3 (per-app-скоуп) из
+   `reset_session`) и **OOV-ретривал** (Часть 2, вариант B: `oov_suggestions` +
+   `enum Ranked` — набранные слова вне лексикона достаются из сессионного словаря).
+   Дальше: Часть 3 (per-app-скоуп) из
    [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md), нейрореранкер,
    recency-срез в `abbrev gen`.
 5. ~~**Морфология**~~ — сделано (первый слой): граммемы OpenCorpora в 4-й

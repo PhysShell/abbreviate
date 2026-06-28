@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use crate::alphabet::normalize;
+use crate::alphabet::{normalize, skeleton};
 
 /// Default half-life of the recency boost, in *words observed*. A form's
 /// prior halves every `half_life` words typed since it was last seen.
@@ -32,13 +32,42 @@ pub const DEFAULT_HALF_LIFE: f32 = 80.0;
 /// their contribution is ~0, removal changes no ranking.
 const PRUNE_HALF_LIVES: f32 = 16.0;
 
-/// Per-session recency cache: last logical tick at which each form was seen.
+/// One observed session word: its display spelling (for insertion), its
+/// precomputed consonant skeleton (for OOV retrieval) and the tick it was
+/// last seen at (for recency decay).
+#[derive(Debug, Clone)]
+struct SessionEntry {
+    /// Spelling as the user committed it, restored on insertion.
+    display: String,
+    /// Consonant skeleton of the normalized form, computed once at `note`.
+    skeleton: String,
+    /// Logical tick the word was last observed at.
+    seen: u64,
+}
+
+/// Read-only view of a session word, handed to the engine for out-of-lexicon
+/// candidate generation (Part 2). Borrows the cache; carries the recency
+/// prior already computed so the engine needn't reach back in.
+pub(crate) struct SessionWord<'a> {
+    /// Normalized form (matching key).
+    pub norm: &'a str,
+    /// Display spelling to insert.
+    pub display: &'a str,
+    /// Consonant skeleton of the normalized form.
+    pub skeleton: &'a str,
+    /// Recency prior in `[0, 1]` (1.0 just-used, decays to 0.0).
+    pub recency_prior: f32,
+}
+
+/// Per-session recency cache: the words observed this session, keyed by
+/// normalized form, with the tick each was last seen at. Doubles as the
+/// session vocabulary for out-of-lexicon retrieval.
 #[derive(Debug, Clone)]
 pub struct SessionCache {
     /// Monotonic count of observed words; advances once per [`note`](Self::note).
     tick: u64,
-    /// Normalized form → tick at which it was last observed.
-    last_seen: HashMap<String, u64>,
+    /// Normalized form → its session entry.
+    last_seen: HashMap<String, SessionEntry>,
     /// Decay half-life in observed words.
     half_life: f32,
 }
@@ -66,12 +95,18 @@ impl SessionCache {
     /// normalized (lowercase, `ё→е`) before storage, the same way
     /// [`prior`](Self::prior) normalizes its lookup.
     pub fn note(&mut self, word: &str) {
-        let key = normalize(word.trim());
+        let trimmed = word.trim();
+        let key = normalize(trimmed);
         if key.is_empty() {
             return;
         }
         self.tick += 1;
-        self.last_seen.insert(key, self.tick);
+        let entry = SessionEntry {
+            display: trimmed.to_string(),
+            skeleton: skeleton(&key),
+            seen: self.tick,
+        };
+        self.last_seen.insert(key, entry);
         // Bound memory in long-lived sessions: `note` runs once per committed
         // word, so without eviction `last_seen` would grow with the whole
         // session vocabulary. Entries past the prune horizon have a negligible
@@ -82,7 +117,7 @@ impl SessionCache {
         let horizon = self.prune_horizon();
         if self.last_seen.len() as u64 > 2 * horizon {
             let cutoff = self.tick.saturating_sub(horizon);
-            self.last_seen.retain(|_, &mut seen| seen > cutoff);
+            self.last_seen.retain(|_, e| e.seen > cutoff);
         }
     }
 
@@ -101,12 +136,28 @@ impl SessionCache {
     /// candidate per keystroke for nothing).
     pub(crate) fn prior_normalized(&self, form_norm: &str) -> f32 {
         match self.last_seen.get(form_norm) {
-            Some(&seen) => {
-                let elapsed = self.tick.saturating_sub(seen) as f32;
-                0.5f32.powf(elapsed / self.half_life)
-            }
+            Some(e) => self.decay(e.seen),
             None => 0.0,
         }
+    }
+
+    /// Recency prior of an entry last seen at `seen`: `0.5^(elapsed/half_life)`.
+    fn decay(&self, seen: u64) -> f32 {
+        let elapsed = self.tick.saturating_sub(seen) as f32;
+        0.5f32.powf(elapsed / self.half_life)
+    }
+
+    /// Iterates the session vocabulary for out-of-lexicon retrieval (Part 2):
+    /// each word's normalized form, display spelling, skeleton and current
+    /// recency prior. The engine filters out words already in the lexicon and
+    /// scores the rest as candidates.
+    pub(crate) fn words(&self) -> impl Iterator<Item = SessionWord<'_>> {
+        self.last_seen.iter().map(|(norm, e)| SessionWord {
+            norm,
+            display: &e.display,
+            skeleton: &e.skeleton,
+            recency_prior: self.decay(e.seen),
+        })
     }
 
     /// Tick age past which an entry's prior is negligible and it is evicted.
@@ -174,6 +225,19 @@ mod tests {
         assert_eq!(c.prior(" СИНХРОФАЗОТРЕН "), 1.0);
         // The hot-path variant still expects an already-normalized key.
         assert_eq!(c.prior_normalized("синхрофазотрен"), 1.0);
+    }
+
+    #[test]
+    fn words_expose_display_skeleton_and_prior() {
+        let mut c = SessionCache::default();
+        c.note("  Синхрофазотрон ");
+        let words: Vec<_> = c.words().collect();
+        assert_eq!(words.len(), 1);
+        let w = &words[0];
+        assert_eq!(w.norm, "синхрофазотрон"); // normalized key
+        assert_eq!(w.display, "Синхрофазотрон"); // trimmed, case preserved
+        assert_eq!(w.skeleton, "снхрфзтрн"); // consonant skeleton
+        assert_eq!(w.recency_prior, 1.0); // just observed
     }
 
     #[test]
