@@ -141,7 +141,13 @@ fn jittered(base: &Weights, rng: &mut Rng, amount: f64) -> Weights {
         context: (base.context * rng.jitter(amount)).max(0.0),
         user: (base.user * rng.jitter(amount)).max(0.0),
         morph: (base.morph * rng.jitter(amount)).max(0.0),
-        recency: (base.recency * rng.jitter(amount)).max(0.0),
+        // Pinned, not jittered: tune cases never call `note_word`, so
+        // `recency_prior` is 0 for every candidate and this weight has no
+        // effect on the objective. Jittering it would let random search bake
+        // an arbitrary, unvalidated multiplier into the adopted weights
+        // (carried along by steps accepted on the *other* weights). Tune it
+        // only once the benchmark exercises recency (the `abbrev gen` slice).
+        recency: base.recency,
     }
 }
 
