@@ -154,7 +154,7 @@ docs/
 ```text
 score = w_skel·skeleton_match + w_suf·suffix_compat + w_pref·prefix_agreement
       − w_edit·edit_distance + w_freq·ln(1+ipm) + w_ctx·context_lm
-      + w_user·user_prior + w_morph·morph_compatibility + w_rec·recency_prior
+      + w_user·user_prior + w_morph·morph_compatibility + w_recency·recency_prior
 ```
 
 * `skeleton_match` — градуированный: точное совпадение скелетов = 1.0, иначе

@@ -233,11 +233,20 @@ mod tests {
     }
 
     #[test]
-    fn session_cache_surface_smoke() {
-        let mut engine = WasmEngine::new(None).unwrap();
+    fn session_cache_changes_top_suggestion() {
+        // Close frequencies so the recency boost is decisive at limit 1
+        // (the demo's привет dominates приват on frequency alone, which would
+        // make the test pass even if note_word were a no-op).
+        let tsv = "привет\tпривет\t150\nприват\tприват\t100\n";
+        let mut engine = WasmEngine::new(Some(tsv.to_string())).unwrap();
+        // Baseline: frequency picks привет.
+        assert!(engine.suggest_json("првт", "", 1).contains("привет"));
+        // A noted word takes the top slot...
         engine.note_word("приват");
-        assert!(engine.suggest_json("првт", "", 3).contains("приват"));
+        assert!(engine.suggest_json("првт", "", 1).contains("приват"));
+        // ...and resetting the context restores the baseline.
         engine.reset_session();
+        assert!(engine.suggest_json("првт", "", 1).contains("привет"));
     }
 
     #[test]

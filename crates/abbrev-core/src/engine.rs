@@ -271,7 +271,7 @@ impl Engine {
                 context: self.context_model.score(context, &entry.form, &entry.lemma),
                 user_prior: self.history.prior(&input_skeleton, &form_norm),
                 morph_compatibility: morph::compatibility(&prev_word, &entry.tags),
-                recency_prior: self.session.prior(&form_norm),
+                recency_prior: self.session.prior_normalized(&form_norm),
             };
             scored.push((score(&signals, &self.config.weights), id));
         }

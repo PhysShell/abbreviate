@@ -26,6 +26,12 @@ use crate::alphabet::normalize;
 /// prior halves every `half_life` words typed since it was last seen.
 pub const DEFAULT_HALF_LIFE: f32 = 80.0;
 
+/// Entries older than this many half-lives have a prior below `0.5^16`
+/// (~1.5e-5) — negligible against every other ranking signal. Past the
+/// horizon they are evicted to bound memory in long-lived sessions; since
+/// their contribution is ~0, removal changes no ranking.
+const PRUNE_HALF_LIVES: f32 = 16.0;
+
 /// Per-session recency cache: last logical tick at which each form was seen.
 #[derive(Debug, Clone)]
 pub struct SessionCache {
@@ -57,8 +63,8 @@ impl SessionCache {
 
     /// Records that the shell observed `word` in the current context (a
     /// committed word, not the in-progress input). The raw word is
-    /// normalized (lowercase, `ё→е`) before storage, matching the form key
-    /// used by [`prior`](Self::prior).
+    /// normalized (lowercase, `ё→е`) before storage, the same way
+    /// [`prior`](Self::prior) normalizes its lookup.
     pub fn note(&mut self, word: &str) {
         let key = normalize(word.trim());
         if key.is_empty() {
@@ -66,13 +72,34 @@ impl SessionCache {
         }
         self.tick += 1;
         self.last_seen.insert(key, self.tick);
+        // Bound memory in long-lived sessions: `note` runs once per committed
+        // word, so without eviction `last_seen` would grow with the whole
+        // session vocabulary. Entries past the prune horizon have a negligible
+        // prior (see `PRUNE_HALF_LIVES`), so dropping them changes no ranking.
+        // Sweep only past twice the horizon, keeping `note` amortized O(1):
+        // all `last_seen` ticks are distinct, so at most `horizon` entries
+        // survive a sweep, and we add at most `horizon` before the next one.
+        let horizon = self.prune_horizon();
+        if self.last_seen.len() as u64 > 2 * horizon {
+            let cutoff = self.tick.saturating_sub(horizon);
+            self.last_seen.retain(|_, &mut seen| seen > cutoff);
+        }
     }
 
-    /// Recency prior for an already-normalized form, in `[0, 1]`: `1.0` the
-    /// instant after it was observed, halving every `half_life` words since.
-    /// `0.0` for a form never seen this session — neutral, never negative
-    /// (absence of recency must not bury a candidate).
-    pub fn prior(&self, form_norm: &str) -> f32 {
+    /// Recency prior for a raw `word`, in `[0, 1]`: `1.0` the instant after it
+    /// was observed, halving every `half_life` words since. `0.0` for a form
+    /// never seen this session — neutral, never negative (absence of recency
+    /// must not bury a candidate). The input is normalized the same way as
+    /// [`note`](Self::note), so the same spelling always matches.
+    pub fn prior(&self, word: &str) -> f32 {
+        self.prior_normalized(&normalize(word.trim()))
+    }
+
+    /// Hot-path variant of [`prior`](Self::prior) for a key the caller has
+    /// already normalized (the engine computes the form's normalized spelling
+    /// once per candidate, so re-normalizing here would allocate per
+    /// candidate per keystroke for nothing).
+    pub(crate) fn prior_normalized(&self, form_norm: &str) -> f32 {
         match self.last_seen.get(form_norm) {
             Some(&seen) => {
                 let elapsed = self.tick.saturating_sub(seen) as f32;
@@ -80,6 +107,11 @@ impl SessionCache {
             }
             None => 0.0,
         }
+    }
+
+    /// Tick age past which an entry's prior is negligible and it is evicted.
+    fn prune_horizon(&self) -> u64 {
+        (self.half_life * PRUNE_HALF_LIVES).ceil() as u64
     }
 
     /// Clears the cache — the shell calls this when the context changes
@@ -132,12 +164,34 @@ mod tests {
     }
 
     #[test]
-    fn note_normalizes_the_word() {
+    fn note_and_prior_agree_on_raw_spelling() {
         let mut c = SessionCache::default();
         c.note("  Синхрофазотрён ");
-        // Normalized key (lowercase, ё→е, trimmed) is what prior expects.
+        // prior normalizes its input the same way note does, so any case / ё /
+        // whitespace variant of the same word matches (no normalize-only trap).
+        assert_eq!(c.prior("Синхрофазотрён"), 1.0);
         assert_eq!(c.prior("синхрофазотрен"), 1.0);
-        assert_eq!(c.prior("Синхрофазотрён"), 0.0);
+        assert_eq!(c.prior(" СИНХРОФАЗОТРЕН "), 1.0);
+        // The hot-path variant still expects an already-normalized key.
+        assert_eq!(c.prior_normalized("синхрофазотрен"), 1.0);
+    }
+
+    #[test]
+    fn long_session_evicts_stale_entries() {
+        let mut c = SessionCache::with_half_life(4.0);
+        let horizon = (4.0 * PRUNE_HALF_LIVES).ceil() as usize;
+        // Far more unique words than the horizon: memory must stay bounded.
+        for i in 0..10_000 {
+            c.note(&format!("слово{i}"));
+        }
+        assert!(
+            c.last_seen.len() <= 2 * horizon,
+            "cache grew unbounded: {}",
+            c.last_seen.len()
+        );
+        // A long-evicted word reads as neutral; a recent one still boosts.
+        assert_eq!(c.prior("слово0"), 0.0);
+        assert!(c.prior("слово9999") > 0.9);
     }
 
     #[test]
