@@ -21,4 +21,17 @@ interface SuggestionPort {
 
     /** Confirmed-pick learning signal; no-op for fakes that don't learn. */
     fun accept(input: String, form: String) {}
+
+    /**
+     * Feed a committed word into the ephemeral session recency cache so a
+     * freshly-used word floats up (and out-of-lexicon words become reachable).
+     * No-op for fakes that don't keep a cache.
+     */
+    fun noteWord(word: String) {}
+
+    /**
+     * Clear the session recency cache — called on a context change (a different
+     * app/field), so recency never leaks across contexts. No-op for fakes.
+     */
+    fun resetSession() {}
 }

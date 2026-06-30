@@ -23,6 +23,14 @@ class UniffiSuggestionPort(private val engine: AbbrevEngine) : SuggestionPort {
         engine.accept(input, form)
     }
 
+    override fun noteWord(word: String) {
+        engine.noteWord(word)
+    }
+
+    override fun resetSession() {
+        engine.resetSession()
+    }
+
     companion object {
         /**
          * Engine over the tiny built-in demo lexicon — a fallback that exercises

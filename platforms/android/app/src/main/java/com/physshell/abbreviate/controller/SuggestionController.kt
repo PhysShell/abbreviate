@@ -86,8 +86,27 @@ class SuggestionController(
         }
         host.replaceTokenAtCursor(token, item.form)
         port.accept(token, item.form)
+        // A picked form is a committed word: feed it to the recency cache so it
+        // floats up next time the topic recurs.
+        port.noteWord(item.form)
         state = EMPTY
         return item.form
+    }
+
+    /**
+     * Note the word ending at the caret as a committed word — the host calls
+     * this when a separator (space, enter) is about to finish it, so a word the
+     * user typed *without* picking a suggestion still warms the recency cache.
+     * A non-word tail is ignored here and filtered again by the engine.
+     */
+    fun noteCommitted(textBeforeCursor: String) {
+        val token = tokenAtCursor(textBeforeCursor)
+        if (token.isNotEmpty()) port.noteWord(token)
+    }
+
+    /** Clear the session recency cache (host calls this on a context change). */
+    fun resetSession() {
+        port.resetSession()
     }
 
     companion object {

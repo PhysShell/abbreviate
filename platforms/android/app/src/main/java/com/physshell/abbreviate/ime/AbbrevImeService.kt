@@ -70,6 +70,10 @@ class AbbrevImeService : InputMethodService(), TextHost {
     // next key is backspace we restore the token instead of deleting a char.
     private var lastAutoAccept: Pair<String, String>? = null
 
+    // Package of the field we are currently attached to. The session recency
+    // cache is scoped per app: when this changes we reset it (see onStartInputView).
+    private var currentPackage: String? = null
+
     override fun onCreate() {
         super.onCreate()
         ruConsonant = prefs.getBoolean(KEY_CONSONANT, false)
@@ -95,6 +99,16 @@ class AbbrevImeService : InputMethodService(), TextHost {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         lastAutoAccept = null
+        // Per-app session cache: switching to a different app's field clears the
+        // ephemeral recency cache, so a word learned in one app doesn't leak
+        // into another. The IME only sees the package, not *which chat* inside
+        // an app, so this is per-app, not per-conversation (see docs/RESEARCH-
+        // RECENCY-CACHE.md §5).
+        val pkg = info?.packageName
+        if (pkg != currentPackage) {
+            controller?.resetSession()
+            currentPackage = pkg
+        }
         refresh() // recompute against whatever field we just attached to
     }
 
@@ -129,13 +143,16 @@ class AbbrevImeService : InputMethodService(), TextHost {
         val c = controller
         if (c != null && !c.state.isEmpty) {
             val token = c.state.token
-            val form = c.accept(this, 0) // always the top suggestion
+            val form = c.accept(this, 0) // always the top suggestion (also notes it)
             if (form != null) {
                 lastAutoAccept = token to form
                 refresh()
                 return
             }
         }
+        // No suggestion taken: the word the user just typed is committed by this
+        // space — feed it to the recency cache before inserting the separator.
+        c?.noteCommitted(textBeforeCursor())
         onKey(" ")
     }
 
@@ -166,6 +183,8 @@ class AbbrevImeService : InputMethodService(), TextHost {
 
     private fun onEnter() {
         lastAutoAccept = null
+        // The word before the caret is committed by enter — note it too.
+        controller?.noteCommitted(textBeforeCursor())
         sendDefaultEditorAction(true)
     }
 
