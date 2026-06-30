@@ -329,7 +329,10 @@ substring-фильтр зацензурит невинное («застраху
 Часть 2 вариант B (OOV-ретривал) + Часть 3 per-app (скоуп оболочки). Порядок:
 
 1. ~~Часть 1: `recency.rs`, сигнал, вес, юнит-тесты~~ — **сделано** (#23).
-   ~~recency-срез для подбора `w.recency`~~ — **сделано**: `bench --recency`.
+   ~~recency-срез для подбора `w.recency`~~ — **сделано**: `bench --recency`
+   (лифт cold→warm) + `tune --recency` (свип веса с состязательными кейсами).
+   Боевой прогон: +13.7пп top-1 при noise=0; `w_recency=1.0` оставлен как
+   консервативная точка кривой (см. BENCHMARKS.md).
 2. ~~Часть 2 (B): параллельный merge OOV в `suggest`/`suggest_grouped`~~ —
    **сделано**: `SessionCache.words()` + `Engine::oov_suggestions` + `enum Ranked`,
    OOV-приор плавает на `recency` (freq=0), как у имён. Без новой FFI/WASM-поверхности.

@@ -14,9 +14,10 @@
 //! prints them, and a human decides whether to bake them into
 //! `rank::Weights::default` and re-verify the acceptance set.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::process::ExitCode;
 
+use abbrev_core::alphabet::{normalize, skeleton};
 use abbrev_core::{BigramModel, Context, Engine, Lexicon, Shortcuts, Weights};
 
 /// xorshift64 — deterministic, dependency-free.
@@ -159,6 +160,7 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
     let mut shortcuts_path: Option<String> = None;
     let mut iters = 300usize;
     let mut seed = 1u64;
+    let mut recency = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -167,6 +169,9 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
             "--lexicon" => lexicon_path = it.next().cloned(),
             "--lm" => lm_path = it.next().cloned(),
             "--shortcuts" => shortcuts_path = it.next().cloned(),
+            // Sweep w_recency instead of random-searching all weights — recency
+            // is gated by the session cache, so it needs its own harness.
+            "--recency" => recency = true,
             "--iters" => match it.next().and_then(|v| v.parse().ok()) {
                 Some(v) => iters = v,
                 None => return fail("--iters needs a number"),
@@ -190,6 +195,9 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
         Ok(t) => parse_cases(&t),
         Err(e) => return fail(&format!("cannot read {train_path}: {e}")),
     };
+    if recency {
+        return recency_sweep(&mut engine, &train);
+    }
     let valid = match &valid_path {
         Some(p) => match std::fs::read_to_string(p) {
             Ok(t) => parse_cases(&t),
@@ -261,6 +269,105 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
         println!("verdict: KEEP BASELINE — gain on {report} is within noise.");
     }
     ExitCode::SUCCESS
+}
+
+/// Sweeps `w_recency` over a grid, reporting two top-1 rates per value:
+///
+/// * **positive** — note `expected`, then suggest: how often recency floats the
+///   just-used word to the top (the lift we want);
+/// * **adversarial** — note a *competitor* (another word with the same input
+///   skeleton), then suggest: how often `expected` still wins despite a
+///   *different* recent word competing (the over-boost we must avoid).
+///
+/// Unlike the other weights, recency is gated by the cache (`recency_prior` is 0
+/// otherwise), so it has zero cost on the plain benchmark and a naive
+/// maximize-positive search would push it to infinity. The adversarial column is
+/// the brake: it falls as the weight rises. The knee — high positive while
+/// adversarial stays near its `w=0` value — is the weight to adopt.
+fn recency_sweep(engine: &mut Engine, cases: &[Case]) -> ExitCode {
+    // Top-2 normalized forms per skeleton, by frequency: a competitor for a case
+    // is the most frequent same-skeleton form that isn't the expected answer.
+    let mut by_skel: HashMap<String, Vec<(String, f32)>> = HashMap::new();
+    for (_, e) in engine.lexicon().iter() {
+        let norm = normalize(&e.form);
+        let entry = by_skel.entry(skeleton(&norm)).or_default();
+        entry.push((norm, e.freq));
+        entry.sort_by(|a, b| b.1.total_cmp(&a.1));
+        entry.truncate(2);
+    }
+    let competitor = |input: &str, expected_norm: &str| -> Option<String> {
+        by_skel
+            .get(&skeleton(&normalize(input)))?
+            .iter()
+            .map(|(f, _)| f)
+            .find(|f| *f != expected_norm)
+            .cloned()
+    };
+
+    // Real usage reuses a just-typed word far more often than it immediately
+    // switches to a same-skeleton competitor, so the operating point weights
+    // positive over adversarial (assume ~4:1) rather than treating them equally
+    // (min()) — which would always pick w=0 and discard the whole signal.
+    const REUSE_SHARE: f64 = 0.8;
+    const GRID: [f32; 8] = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
+    println!(
+        "recency sweep over {} cases (note expected vs note competitor)",
+        cases.len()
+    );
+    println!("  w_recency   positive top-1   adversarial top-1   blend(4:1)");
+    let mut best: Option<(f32, f64)> = None;
+    for &w in &GRID {
+        engine.set_weights(Weights {
+            recency: w,
+            ..Weights::default()
+        });
+
+        let (mut pos, mut pos_n) = (0u32, 0u32);
+        let (mut adv, mut adv_n) = (0u32, 0u32);
+        for case in cases {
+            let expected_norm = normalize(&case.expected);
+
+            engine.reset_session();
+            engine.note_word(&case.expected);
+            if top1_matches(engine, &case.input, &case.context, &expected_norm) {
+                pos += 1;
+            }
+            pos_n += 1;
+
+            if let Some(comp) = competitor(&case.input, &expected_norm) {
+                engine.reset_session();
+                engine.note_word(&comp);
+                if top1_matches(engine, &case.input, &case.context, &expected_norm) {
+                    adv += 1;
+                }
+                adv_n += 1;
+            }
+        }
+        let pos_rate = 100.0 * f64::from(pos) / f64::from(pos_n.max(1));
+        let adv_rate = 100.0 * f64::from(adv) / f64::from(adv_n.max(1));
+        let blend = REUSE_SHARE * pos_rate + (1.0 - REUSE_SHARE) * adv_rate;
+        println!("  {w:>7.1}     {pos_rate:>10.1}%       {adv_rate:>12.1}%     {blend:>7.1}%");
+        if best.is_none_or(|(_, b)| blend > b) {
+            best = Some((w, blend));
+        }
+    }
+    engine.reset_session();
+    if let Some((w, b)) = best {
+        println!(
+            "\nUnder an assumed 4:1 reuse:switch mix, the blend peaks at w_recency = {w:.1} \
+             (blended top-1 {b:.1}%).\nThe default 1.0 is a conservative point on this curve; \
+             raise it toward the knee only if real logs show reuse dominates."
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+/// True when the engine's top-1 form (normalized) equals `expected_norm`.
+fn top1_matches(engine: &Engine, input: &str, context: &Context, expected_norm: &str) -> bool {
+    engine
+        .suggest(input, context, 1)
+        .first()
+        .is_some_and(|s| normalize(&s.form) == expected_norm)
 }
 
 fn print_eval(label: &str, e: &Eval) {
