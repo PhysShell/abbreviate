@@ -195,6 +195,9 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
         Ok(t) => parse_cases(&t),
         Err(e) => return fail(&format!("cannot read {train_path}: {e}")),
     };
+    if train.is_empty() {
+        return fail("no training cases");
+    }
     if recency {
         return recency_sweep(&mut engine, &train);
     }
@@ -205,9 +208,6 @@ pub fn cmd_tune(args: Vec<String>) -> ExitCode {
         },
         None => Vec::new(),
     };
-    if train.is_empty() {
-        return fail("no training cases");
-    }
 
     let baseline = Weights::default();
     engine.set_weights(baseline);
