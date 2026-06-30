@@ -270,6 +270,11 @@ impl Engine {
             return items;
         }
         let mut out = Vec::with_capacity(items.len() + 1);
+        // Twins skip the caller's surface-form dedup, so two distinct forms
+        // that mask to the same string (`блять`/`блядь` → `бл@#ь`) would emit
+        // it twice. Dedup twins here against everything already shown — both
+        // originals and earlier twins — preserving the flat API's invariant.
+        let mut seen: HashSet<String> = HashSet::new();
         for s in items {
             let twin = if self.masker.is_masked_lemma(&s.lemma) {
                 Masker::mask_form(&s.form)
@@ -277,11 +282,14 @@ impl Engine {
                 None
             };
             let score = s.score;
+            seen.insert(normalize(&s.form));
             out.push(s);
-            if let Some(form) = twin {
-                // The twin is its own lemma (the masked string) with no
-                // paradigm, so nothing profane leaks through the lemma field
-                // and a "hold" shows no forms.
+            // The twin is its own lemma (the masked string) with no paradigm,
+            // so nothing profane leaks through the lemma field and a "hold"
+            // shows no forms.
+            if let Some(form) = twin
+                && seen.insert(normalize(&form))
+            {
                 out.push(Suggestion {
                     lemma: form.clone(),
                     form,
@@ -552,6 +560,9 @@ impl Engine {
             return groups;
         }
         let mut out = Vec::with_capacity(groups.len() + 1);
+        // Dedup twin groups by their visible form, as in `masked`: two
+        // censored lemmas can mask to the same string.
+        let mut seen_twins: HashSet<String> = HashSet::new();
         for g in groups {
             let twin = if self.masker.is_masked_lemma(&g.lemma) {
                 Masker::mask_form(&g.best.form)
@@ -560,7 +571,9 @@ impl Engine {
             };
             let score = g.best.score;
             out.push(g);
-            if let Some(form) = twin {
+            if let Some(form) = twin
+                && seen_twins.insert(normalize(&form))
+            {
                 out.push(SuggestionGroup {
                     lemma: form.clone(),
                     best: Suggestion {
@@ -882,6 +895,28 @@ mod tests {
         let twin = groups.iter().find(|g| g.best.form == "ред@#&а").unwrap();
         assert_eq!(twin.lemma, "ред@#&а");
         assert!(twin.variants.is_empty());
+    }
+
+    #[test]
+    fn duplicate_twins_are_deduped() {
+        use crate::mask::Masker;
+        // Two distinct censored forms that mask to the *same* string must not
+        // both surface it — the flat API dedups by visible form.
+        let tsv = "блять\tблядь\t300\tNOUN\n\
+                   блядь\tблядь\t200\tNOUN\n";
+        let mask_cfg = EngineConfig {
+            mask: true,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::with_config(Lexicon::from_tsv_str(tsv).unwrap(), mask_cfg);
+        e.set_masker(Masker::from_list_str("блядь\n").unwrap());
+        let forms = top_forms(&e, "блять", 20);
+        let masked: Vec<_> = forms.iter().filter(|f| f.contains('@')).collect();
+        assert_eq!(masked.len(), 1, "twin should appear once, got {forms:?}");
+        // The grouped API dedups too.
+        let groups = e.suggest_grouped("блять", &Context::default(), 20);
+        let masked_groups = groups.iter().filter(|g| g.best.form.contains('@')).count();
+        assert_eq!(masked_groups, 1, "twin group should appear once");
     }
 
     #[test]
