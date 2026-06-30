@@ -13,6 +13,7 @@ use crate::edit::{EditCosts, weighted_distance};
 use crate::history::UserHistory;
 use crate::index::{Indexes, delete_variants};
 use crate::lexicon::{EntryId, Lexicon};
+use crate::mask::Masker;
 use crate::morph;
 use crate::paradigm::{ParadigmGroup, Paradigms};
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
@@ -52,6 +53,11 @@ pub struct EngineConfig {
     /// Minimum input-skeleton length for typo-tolerant retrieval; short
     /// skeletons make distance-1 matches meaningless.
     pub fuzzy_skeleton_min_len: usize,
+    /// Offer a masked twin (`долбоёб → дол@#&б`) next to any candidate whose
+    /// lemma is on the [`Masker`] censor list. Off by default — masking costs
+    /// nothing and changes nothing until a host opts in (the *when* is shell
+    /// policy; see `mask.rs` and `docs/RESEARCH-RECENCY-CACHE.md` §5.2).
+    pub mask: bool,
     pub weights: Weights,
     pub costs: EditCosts,
 }
@@ -65,6 +71,7 @@ impl Default for EngineConfig {
             edit_cutoff_per_char: 0.3,
             typo_tolerance: true,
             fuzzy_skeleton_min_len: 3,
+            mask: false,
             weights: Weights::default(),
             costs: EditCosts::default(),
         }
@@ -102,6 +109,7 @@ pub struct Engine {
     session: SessionCache,
     context_model: Box<dyn ContextModel>,
     shortcuts: Shortcuts,
+    masker: Masker,
     paradigms: Option<Paradigms>,
     config: EngineConfig,
 }
@@ -164,6 +172,7 @@ impl Engine {
             session: SessionCache::default(),
             context_model: Box::new(NoContext),
             shortcuts: Shortcuts::default(),
+            masker: Masker::default(),
             paradigms: None,
             config,
         }
@@ -185,6 +194,12 @@ impl Engine {
     /// Loads the conventional-shortcuts layer (exact-match shorthand).
     pub fn set_shortcuts(&mut self, shortcuts: Shortcuts) {
         self.shortcuts = shortcuts;
+    }
+
+    /// Loads the profanity-masking censor list. Inert unless
+    /// [`EngineConfig::mask`] is also set (the *when* is the host's call).
+    pub fn set_masker(&mut self, masker: Masker) {
+        self.masker = masker;
     }
 
     /// Replaces the ranking weights without rebuilding indexes — weights do
@@ -227,8 +242,7 @@ impl Engine {
         // Exact shortcuts already fill the strip: skip the full fuzzy
         // retrieval/ranking entirely (a top-1 shortcut must not pay it).
         if out.len() >= limit {
-            out.truncate(limit);
-            return out;
+            return self.masked(out, limit);
         }
         for ranked in self.ranked(input, context, limit) {
             if out.len() >= limit {
@@ -237,6 +251,42 @@ impl Engine {
             let suggestion = ranked.into_suggestion(&self.lexicon);
             if seen.insert(normalize(&suggestion.form)) {
                 out.push(suggestion);
+            }
+        }
+        self.masked(out, limit)
+    }
+
+    /// Inserts a masked twin (`долбоёб → дол@#&б`) immediately after every
+    /// suggestion whose lemma is censored, then truncates to `limit`. The
+    /// original is left in place — masking *offers*, never substitutes — so a
+    /// host can render both and the user picks. A no-op (plain truncate) when
+    /// masking is off or the censor list is empty, which is the default and
+    /// costs nothing. Run as a post-step so it never disturbs ranking or the
+    /// surface-form dedup above.
+    fn masked(&self, items: Vec<Suggestion>, limit: usize) -> Vec<Suggestion> {
+        if !self.config.mask || self.masker.is_empty() {
+            let mut items = items;
+            items.truncate(limit);
+            return items;
+        }
+        let mut out = Vec::with_capacity(items.len() + 1);
+        for s in items {
+            let twin = if self.masker.is_masked_lemma(&s.lemma) {
+                Masker::mask_form(&s.form)
+            } else {
+                None
+            };
+            let score = s.score;
+            out.push(s);
+            if let Some(form) = twin {
+                // The twin is its own lemma (the masked string) with no
+                // paradigm, so nothing profane leaks through the lemma field
+                // and a "hold" shows no forms.
+                out.push(Suggestion {
+                    lemma: form.clone(),
+                    form,
+                    score,
+                });
             }
         }
         out.truncate(limit);
@@ -449,7 +499,7 @@ impl Engine {
                 variants,
             });
             if groups.len() == limit {
-                return groups;
+                return self.masked_groups(groups, limit);
             }
         }
         for ranked in self.ranked(input, context, limit) {
@@ -489,7 +539,41 @@ impl Engine {
                 break;
             }
         }
-        groups
+        self.masked_groups(groups, limit)
+    }
+
+    /// Grouped-strip counterpart of [`Self::masked`]: inserts a masked twin
+    /// group (single form, no variants) after every group whose lemma is
+    /// censored, then truncates to `limit`. No-op by default.
+    fn masked_groups(&self, groups: Vec<SuggestionGroup>, limit: usize) -> Vec<SuggestionGroup> {
+        if !self.config.mask || self.masker.is_empty() {
+            let mut groups = groups;
+            groups.truncate(limit);
+            return groups;
+        }
+        let mut out = Vec::with_capacity(groups.len() + 1);
+        for g in groups {
+            let twin = if self.masker.is_masked_lemma(&g.lemma) {
+                Masker::mask_form(&g.best.form)
+            } else {
+                None
+            };
+            let score = g.best.score;
+            out.push(g);
+            if let Some(form) = twin {
+                out.push(SuggestionGroup {
+                    lemma: form.clone(),
+                    best: Suggestion {
+                        lemma: form.clone(),
+                        form,
+                        score,
+                    },
+                    variants: Vec::new(),
+                });
+            }
+        }
+        out.truncate(limit);
+        out
     }
 
     /// All forms of a lemma for the "hold a suggestion to see its forms" UI.
@@ -761,6 +845,54 @@ mod tests {
         // limit 0 yields nothing on both APIs, even for a shortcut hit.
         assert!(e.suggest("спс", &Context::default(), 0).is_empty());
         assert!(e.suggest_grouped("спс", &Context::default(), 0).is_empty());
+    }
+
+    #[test]
+    fn masking_is_opt_in_and_offers_a_twin() {
+        use crate::mask::Masker;
+        // A censored word and an innocent look-alike with a *different* lemma.
+        let tsv = "редиска\tредиска\t100\tNOUN,inan,femn,sing,nomn\n\
+                   редис\tредис\t100\tNOUN,inan,masc,sing,nomn\n";
+        let mask_cfg = EngineConfig {
+            mask: true,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::with_config(Lexicon::from_tsv_str(tsv).unwrap(), mask_cfg);
+        e.set_masker(Masker::from_list_str("редиска\n").unwrap());
+
+        // Censored lemma → masked twin offered right after the original; the
+        // original is never removed.
+        let forms = top_forms(&e, "редиска", 5);
+        assert!(forms.contains(&"редиска".to_string()), "{forms:?}");
+        let i = forms.iter().position(|f| f == "редиска").unwrap();
+        assert_eq!(forms.get(i + 1).map(String::as_str), Some("ред@#&а"));
+
+        // Scunthorpe-safe: `редис` shares a prefix but its lemma is not
+        // censored, so it gets no twin of its own — `редис` is present and the
+        // string that *would* be its mask (`ре@#с`) never appears. (The
+        // censored `редиска` may still surface here via fuzzy retrieval, masked
+        // correctly — that is not what this checks.)
+        let plain = top_forms(&e, "редис", 5);
+        assert!(plain.contains(&"редис".to_string()), "{plain:?}");
+        assert_eq!(Masker::mask_form("редис").as_deref(), Some("ре@#с"));
+        assert!(!plain.contains(&"ре@#с".to_string()), "{plain:?}");
+
+        // The masked twin is its own lemma — nothing profane leaks through it.
+        let groups = e.suggest_grouped("редиска", &Context::default(), 5);
+        let twin = groups.iter().find(|g| g.best.form == "ред@#&а").unwrap();
+        assert_eq!(twin.lemma, "ред@#&а");
+        assert!(twin.variants.is_empty());
+    }
+
+    #[test]
+    fn masking_off_by_default_costs_nothing() {
+        use crate::mask::Masker;
+        let tsv = "редиска\tредиска\t100\tNOUN,inan,femn,sing,nomn\n";
+        // Default config (mask: false): even with a censor list loaded, no twin.
+        let mut e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
+        e.set_masker(Masker::from_list_str("редиска\n").unwrap());
+        let forms = top_forms(&e, "редиска", 5);
+        assert!(forms.iter().all(|f| !f.contains('@')), "{forms:?}");
     }
 
     #[test]
