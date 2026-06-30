@@ -13,6 +13,8 @@ private class FakePort(private val canned: List<Candidate>) : SuggestionPort {
     var lastInput: String? = null
     var lastContext: List<String> = emptyList()
     val accepted = mutableListOf<Pair<String, String>>()
+    val noted = mutableListOf<String>()
+    var resets = 0
 
     override fun suggest(input: String, previousWords: List<String>, limit: Int): List<Candidate> {
         lastInput = input
@@ -22,6 +24,14 @@ private class FakePort(private val canned: List<Candidate>) : SuggestionPort {
 
     override fun accept(input: String, form: String) {
         accepted += input to form
+    }
+
+    override fun noteWord(word: String) {
+        noted += word
+    }
+
+    override fun resetSession() {
+        resets++
     }
 }
 
@@ -78,7 +88,44 @@ class SuggestionControllerTest {
         assertEquals("приватный", inserted)
         assertEquals("првт" to "приватный", host.replacements.single())
         assertEquals("првт" to "приватный", port.accepted.single())
+        // accept() does NOT note: the host decides when a pick is committed
+        // (explicit picks immediately, a smart-space auto-accept only once its
+        // undo window closes), so a reverted auto-accept never warms the cache.
+        assertTrue(port.noted.isEmpty())
         assertTrue("strip clears after a pick", c.state.isEmpty)
+    }
+
+    @Test
+    fun note_word_forwards_to_the_port_and_skips_empty() {
+        val port = FakePort(emptyList())
+        val c = SuggestionController(port)
+        c.noteWord("синхрофазотрон")
+        c.noteWord("") // ignored
+        assertEquals(listOf("синхрофазотрон"), port.noted)
+    }
+
+    @Test
+    fun note_committed_feeds_the_word_at_the_caret() {
+        val port = FakePort(emptyList())
+        val c = SuggestionController(port)
+        c.noteCommitted("это синхрофазотрон")
+        assertEquals(listOf("синхрофазотрон"), port.noted)
+    }
+
+    @Test
+    fun note_committed_ignores_a_non_word_tail() {
+        val port = FakePort(emptyList())
+        val c = SuggestionController(port)
+        c.noteCommitted("слово ") // trailing separator: no word at the caret
+        c.noteCommitted("")
+        assertTrue(port.noted.isEmpty())
+    }
+
+    @Test
+    fun reset_session_forwards_to_the_port() {
+        val port = FakePort(emptyList())
+        SuggestionController(port).resetSession()
+        assertEquals(1, port.resets)
     }
 
     @Test

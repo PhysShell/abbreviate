@@ -371,9 +371,9 @@ proptest как dev-dependency — в рантайм не попадает, ADR-
    `SessionCache`, Часть 1 — сигнал ранжирования; FFI/WASM `note_word`/
    `reset_session`) и **OOV-ретривал** (Часть 2, вариант B: `oov_suggestions` +
    `enum Ranked` — набранные слова вне лексикона достаются из сессионного словаря).
-   Измерение recency-лифта — `abbrev bench --recency` (cold vs warm). Дальше:
-   Часть 3 (per-app-скоуп) из
-   [RESEARCH-RECENCY-CACHE.md](RESEARCH-RECENCY-CACHE.md) и нейрореранкер.
+   Измерение recency-лифта — `abbrev bench --recency` (cold vs warm). Part 3
+   (per-app-скоуп) сделана в Android IME: `noteWord`/`resetSession` по
+   `EditorInfo.packageName`. Дальше — нейрореранкер и (из ресёрча) register-сигнал.
 5. ~~**Морфология**~~ — сделано (первый слой): граммемы OpenCorpora в 4-й
    колонке лексикона, сигнал `w_morph` = согласование падежа с управляющим
    предлогом (+23пп top-1 на падежном бенчмарке). Дальше — полные парадигмы,

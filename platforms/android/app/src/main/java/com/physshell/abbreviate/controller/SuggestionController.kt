@@ -90,6 +90,32 @@ class SuggestionController(
         return item.form
     }
 
+    /**
+     * Feed a committed word into the recency cache. The host decides *when* a
+     * pick is committed — explicit picks immediately, a speculative smart-space
+     * auto-accept only once its undo window closes — so this passthrough is
+     * deliberately separate from [accept]. An empty word is ignored (and the
+     * engine filters non-words again).
+     */
+    fun noteWord(word: String) {
+        if (word.isNotEmpty()) port.noteWord(word)
+    }
+
+    /**
+     * Note the word ending at the caret as a committed word — the host calls
+     * this when a separator (space, enter) is about to finish it, so a word the
+     * user typed *without* picking a suggestion still warms the recency cache.
+     * A non-word tail is ignored here and filtered again by the engine.
+     */
+    fun noteCommitted(textBeforeCursor: String) {
+        noteWord(tokenAtCursor(textBeforeCursor))
+    }
+
+    /** Clear the session recency cache (host calls this on a context change). */
+    fun resetSession() {
+        port.resetSession()
+    }
+
     companion object {
         val EMPTY = StripState("", emptyList(), -1)
     }
