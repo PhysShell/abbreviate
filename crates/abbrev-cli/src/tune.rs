@@ -325,11 +325,13 @@ fn recency_sweep(engine: &mut Engine, cases: &[Case]) -> ExitCode {
         let (mut pos, mut pos_n) = (0u32, 0u32);
         let (mut adv, mut adv_n) = (0u32, 0u32);
         for case in cases {
+            // Normalized only for the competitor lookup (the pool is normalized);
+            // the hit check compares *surface* forms, like the rest of the bench.
             let expected_norm = normalize(&case.expected);
 
             engine.reset_session();
             engine.note_word(&case.expected);
-            if top1_matches(engine, &case.input, &case.context, &expected_norm) {
+            if top1_matches(engine, &case.input, &case.context, &case.expected) {
                 pos += 1;
             }
             pos_n += 1;
@@ -337,7 +339,7 @@ fn recency_sweep(engine: &mut Engine, cases: &[Case]) -> ExitCode {
             if let Some(comp) = competitor(&case.input, &expected_norm) {
                 engine.reset_session();
                 engine.note_word(&comp);
-                if top1_matches(engine, &case.input, &case.context, &expected_norm) {
+                if top1_matches(engine, &case.input, &case.context, &case.expected) {
                     adv += 1;
                 }
                 adv_n += 1;
