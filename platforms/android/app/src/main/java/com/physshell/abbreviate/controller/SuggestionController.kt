@@ -86,11 +86,19 @@ class SuggestionController(
         }
         host.replaceTokenAtCursor(token, item.form)
         port.accept(token, item.form)
-        // A picked form is a committed word: feed it to the recency cache so it
-        // floats up next time the topic recurs.
-        port.noteWord(item.form)
         state = EMPTY
         return item.form
+    }
+
+    /**
+     * Feed a committed word into the recency cache. The host decides *when* a
+     * pick is committed — explicit picks immediately, a speculative smart-space
+     * auto-accept only once its undo window closes — so this passthrough is
+     * deliberately separate from [accept]. An empty word is ignored (and the
+     * engine filters non-words again).
+     */
+    fun noteWord(word: String) {
+        if (word.isNotEmpty()) port.noteWord(word)
     }
 
     /**
@@ -100,8 +108,7 @@ class SuggestionController(
      * A non-word tail is ignored here and filtered again by the engine.
      */
     fun noteCommitted(textBeforeCursor: String) {
-        val token = tokenAtCursor(textBeforeCursor)
-        if (token.isNotEmpty()) port.noteWord(token)
+        noteWord(tokenAtCursor(textBeforeCursor))
     }
 
     /** Clear the session recency cache (host calls this on a context change). */

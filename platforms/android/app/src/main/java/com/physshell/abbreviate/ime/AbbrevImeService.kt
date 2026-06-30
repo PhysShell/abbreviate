@@ -98,7 +98,7 @@ class AbbrevImeService : InputMethodService(), TextHost {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        lastAutoAccept = null
+        keepAutoAccept() // leaving the old field keeps any pending auto-accept
         // Per-app session cache: switching to a different app's field clears the
         // ephemeral recency cache, so a word learned in one app doesn't leak
         // into another. The IME only sees the package, not *which chat* inside
@@ -127,9 +127,22 @@ class AbbrevImeService : InputMethodService(), TextHost {
 
     // --- key actions -------------------------------------------------------
 
+    /**
+     * A smart-space auto-accept was kept — any action other than the immediate
+     * revert-[onBackspace] supersedes it — so its inserted form is now a
+     * committed word: note it and disarm the undo. No-op when nothing pending.
+     * Deferring the recency note to here (instead of at accept time) means a
+     * suggestion the user instantly reverts never warms the cache.
+     */
+    private fun keepAutoAccept() {
+        val pending = lastAutoAccept ?: return
+        lastAutoAccept = null
+        controller?.noteWord(pending.second) // the inserted form
+    }
+
     /** A plain character key (letter): commit it and recompute. */
     private fun onKey(text: String) {
-        lastAutoAccept = null
+        keepAutoAccept()
         currentInputConnection?.commitText(text, 1)
         refresh()
     }
@@ -140,10 +153,14 @@ class AbbrevImeService : InputMethodService(), TextHost {
      * insert a normal space.
      */
     private fun onSpace() {
+        keepAutoAccept() // a previous auto-accept survived; settle it first
         val c = controller
         if (c != null && !c.state.isEmpty) {
             val token = c.state.token
-            val form = c.accept(this, 0) // always the top suggestion (also notes it)
+            // Speculative: don't note the form yet — it's deferred until the
+            // undo window closes (keepAutoAccept), so an instant revert won't
+            // warm the cache.
+            val form = c.accept(this, 0) // always the top suggestion
             if (form != null) {
                 lastAutoAccept = token to form
                 refresh()
@@ -169,6 +186,8 @@ class AbbrevImeService : InputMethodService(), TextHost {
             val (token, form) = pending
             val inserted = "$form "
             if (ic.getTextBeforeCursor(inserted.length, 0)?.toString() == inserted) {
+                // Immediate revert: the user rejected the auto-accept, so it is
+                // *not* a committed word — deliberately don't note it.
                 ic.beginBatchEdit()
                 ic.deleteSurroundingText(inserted.length, 0)
                 ic.commitText(token, 1)
@@ -176,13 +195,16 @@ class AbbrevImeService : InputMethodService(), TextHost {
                 refresh()
                 return
             }
+            // Not the revert (the inserted text already changed): the auto-accept
+            // was kept, so note it before the normal delete.
+            controller?.noteWord(form)
         }
         ic?.deleteSurroundingText(1, 0)
         refresh()
     }
 
     private fun onEnter() {
-        lastAutoAccept = null
+        keepAutoAccept()
         // The word before the caret is committed by enter — note it too.
         controller?.noteCommitted(textBeforeCursor())
         sendDefaultEditorAction(true)
@@ -190,7 +212,7 @@ class AbbrevImeService : InputMethodService(), TextHost {
 
     private fun toggleLayout() {
         latin = !latin
-        lastAutoAccept = null
+        keepAutoAccept()
         setInputView(buildKeyboard())
         refresh()
     }
@@ -199,7 +221,7 @@ class AbbrevImeService : InputMethodService(), TextHost {
     private fun toggleRuLayout() {
         ruConsonant = !ruConsonant
         prefs.edit().putBoolean(KEY_CONSONANT, ruConsonant).apply()
-        lastAutoAccept = null
+        keepAutoAccept()
         setInputView(buildKeyboard())
         refresh() // setInputView rebuilds the strip view; repopulate it
     }
@@ -218,7 +240,7 @@ class AbbrevImeService : InputMethodService(), TextHost {
         val selected = ic.getSelectedText(0)?.toString()
         if (selected.isNullOrEmpty()) return
         ic.commitText(translit(selected), 1) // replaces the selection
-        lastAutoAccept = null
+        keepAutoAccept()
         refresh()
     }
 
@@ -242,9 +264,11 @@ class AbbrevImeService : InputMethodService(), TextHost {
                 isClickable = true
                 setOnClickListener {
                     controller?.let { c ->
-                        lastAutoAccept = null
+                        keepAutoAccept()
                         c.select(i)
-                        c.accept(this@AbbrevImeService, i)
+                        // Explicit pick (no undo window): note it right away.
+                        val picked = c.accept(this@AbbrevImeService, i)
+                        if (picked != null) c.noteWord(picked)
                         refresh()
                     }
                 }

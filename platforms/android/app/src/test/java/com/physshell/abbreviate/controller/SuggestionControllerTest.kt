@@ -88,9 +88,20 @@ class SuggestionControllerTest {
         assertEquals("приватный", inserted)
         assertEquals("првт" to "приватный", host.replacements.single())
         assertEquals("првт" to "приватный", port.accepted.single())
-        // A picked form is a committed word: it warms the recency cache.
-        assertEquals(listOf("приватный"), port.noted)
+        // accept() does NOT note: the host decides when a pick is committed
+        // (explicit picks immediately, a smart-space auto-accept only once its
+        // undo window closes), so a reverted auto-accept never warms the cache.
+        assertTrue(port.noted.isEmpty())
         assertTrue("strip clears after a pick", c.state.isEmpty)
+    }
+
+    @Test
+    fun note_word_forwards_to_the_port_and_skips_empty() {
+        val port = FakePort(emptyList())
+        val c = SuggestionController(port)
+        c.noteWord("синхрофазотрон")
+        c.noteWord("") // ignored
+        assertEquals(listOf("синхрофазотрон"), port.noted)
     }
 
     @Test
