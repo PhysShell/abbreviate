@@ -116,6 +116,15 @@ class SuggestionController(
         port.resetSession()
     }
 
+    /**
+     * Bind profanity masking to a user setting (§5.2). [whenPolite] tone-gates
+     * it — a masked twin is offered only in a polite window (§5.1). Off by
+     * default; a passthrough to the port, like [noteWord]/[resetSession].
+     */
+    fun setMasking(enabled: Boolean, whenPolite: Boolean) {
+        port.setMasking(enabled, whenPolite)
+    }
+
     companion object {
         val EMPTY = StripState("", emptyList(), -1)
     }

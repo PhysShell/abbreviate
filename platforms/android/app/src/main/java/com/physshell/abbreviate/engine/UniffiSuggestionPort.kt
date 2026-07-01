@@ -31,6 +31,10 @@ class UniffiSuggestionPort(private val engine: AbbrevEngine) : SuggestionPort {
         engine.resetSession()
     }
 
+    override fun setMasking(enabled: Boolean, whenPolite: Boolean) {
+        engine.setMasking(enabled, whenPolite)
+    }
+
     companion object {
         /**
          * Engine over the tiny built-in demo lexicon — a fallback that exercises
@@ -40,18 +44,25 @@ class UniffiSuggestionPort(private val engine: AbbrevEngine) : SuggestionPort {
 
         /**
          * Engine over the real bundled data: the lexicon TSV plus the optional
-         * bigram language model (context ranking) and conventional shortcuts.
-         * Takes plain strings, so the port stays Android-free — the host reads
-         * the assets. Throws if [lexiconTsv] is malformed.
+         * bigram language model (context ranking), conventional shortcuts, and
+         * the profanity-mask / tone-marker lists. Takes plain strings, so the
+         * port stays Android-free — the host reads the assets. Masking stays
+         * **off** until [setMasking] turns it on (a user setting); loading the
+         * lists here just makes them available. Throws if [lexiconTsv] is
+         * malformed.
          */
         fun fromData(
             lexiconTsv: String,
             lmTsv: String? = null,
             shortcutsTsv: String? = null,
+            maskList: String? = null,
+            toneMarkers: String? = null,
         ): UniffiSuggestionPort {
             val engine = AbbrevEngine.fromLexiconTsv(lexiconTsv)
             lmTsv?.let { engine.loadLanguageModel(it) }
             shortcutsTsv?.let { engine.loadShortcuts(it) }
+            maskList?.let { engine.loadMaskList(it) }
+            toneMarkers?.let { engine.loadToneMarkers(it) }
             return UniffiSuggestionPort(engine)
         }
     }

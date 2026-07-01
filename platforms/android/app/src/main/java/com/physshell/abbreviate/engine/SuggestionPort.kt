@@ -34,4 +34,12 @@ interface SuggestionPort {
      * app/field), so recency never leaks across contexts. No-op for fakes.
      */
     fun resetSession() {}
+
+    /**
+     * Enable/disable profanity masking at runtime (§5.2), bound to a user
+     * setting. [whenPolite] additionally tone-gates it — a masked twin is
+     * offered only while the window reads polite (§5.1 gates §5.2). No-op for
+     * fakes, and inert until a mask list is bundled/loaded.
+     */
+    fun setMasking(enabled: Boolean, whenPolite: Boolean) {}
 }

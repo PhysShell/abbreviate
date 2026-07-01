@@ -84,6 +84,7 @@ class AbbrevImeService : InputMethodService(), TextHost {
             main.post {
                 if (destroyed) return@post // load outlived the service
                 controller = SuggestionController(loaded.port)
+                applyMaskingPrefs()
                 refresh()
             }
         }
@@ -109,7 +110,17 @@ class AbbrevImeService : InputMethodService(), TextHost {
             controller?.resetSession()
             currentPackage = pkg
         }
+        applyMaskingPrefs() // the masking toggle may have changed since last field
         refresh() // recompute against whatever field we just attached to
+    }
+
+    /** Push the current masking preferences into the engine (both off by
+     *  default). Cheap and idempotent, so it's safe to call on every field. */
+    private fun applyMaskingPrefs() {
+        controller?.setMasking(
+            enabled = prefs.getBoolean(KEY_MASK, false),
+            whenPolite = prefs.getBoolean(KEY_MASK_POLITE, false),
+        )
     }
 
     // --- TextHost over InputConnection ------------------------------------
@@ -439,6 +450,12 @@ class AbbrevImeService : InputMethodService(), TextHost {
     companion object {
         private const val KEY_CONSONANT = "ru_consonant"
         private const val KEY_VOWELS = "vowels_visible"
+
+        // Profanity masking (§5.2), both off by default — opt-in, so the IME
+        // never rewrites a user's words unless they ask. KEY_MASK_POLITE
+        // tone-gates it (mask only in a polite window, §5.1).
+        private const val KEY_MASK = "mask_profanity"
+        private const val KEY_MASK_POLITE = "mask_when_polite"
 
         private val RU_ROWS = listOf("йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю")
         // RU_ROWS with the vowels (а е ё и о у ы э ю я) dropped — consonants keep

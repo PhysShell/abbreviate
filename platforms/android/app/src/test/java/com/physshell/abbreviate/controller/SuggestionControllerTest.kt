@@ -15,6 +15,7 @@ private class FakePort(private val canned: List<Candidate>) : SuggestionPort {
     val accepted = mutableListOf<Pair<String, String>>()
     val noted = mutableListOf<String>()
     var resets = 0
+    val masking = mutableListOf<Pair<Boolean, Boolean>>()
 
     override fun suggest(input: String, previousWords: List<String>, limit: Int): List<Candidate> {
         lastInput = input
@@ -32,6 +33,10 @@ private class FakePort(private val canned: List<Candidate>) : SuggestionPort {
 
     override fun resetSession() {
         resets++
+    }
+
+    override fun setMasking(enabled: Boolean, whenPolite: Boolean) {
+        masking += enabled to whenPolite
     }
 }
 
@@ -126,6 +131,13 @@ class SuggestionControllerTest {
         val port = FakePort(emptyList())
         SuggestionController(port).resetSession()
         assertEquals(1, port.resets)
+    }
+
+    @Test
+    fun set_masking_forwards_to_the_port() {
+        val port = FakePort(emptyList())
+        SuggestionController(port).setMasking(enabled = true, whenPolite = true)
+        assertEquals(listOf(true to true), port.masking)
     }
 
     @Test

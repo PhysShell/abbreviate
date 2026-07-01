@@ -24,7 +24,13 @@ object EngineLoader {
             val lexicon = readAsset(assets, "lexicon.tsv") ?: error("lexicon.tsv not bundled")
             val lm = readAsset(assets, "lm.tsv")
             val shortcuts = readAsset(assets, "shortcuts.tsv")
-            LoadedEngine(UniffiSuggestionPort.fromData(lexicon, lm, shortcuts), lm != null, false)
+            val mask = readAsset(assets, "mask.txt")
+            val tone = readAsset(assets, "tone.tsv")
+            LoadedEngine(
+                UniffiSuggestionPort.fromData(lexicon, lm, shortcuts, mask, tone),
+                lm != null,
+                false,
+            )
         } catch (e: Exception) {
             Log.w(TAG, "real lexicon unavailable, falling back to demo", e)
             LoadedEngine(UniffiSuggestionPort.demo(), hasLm = false, isDemo = true)

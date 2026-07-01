@@ -220,6 +220,16 @@ impl Engine {
         self.tone = tone;
     }
 
+    /// Flips the masking gate at runtime (§5.2), so a shell can bind it to a
+    /// user setting without rebuilding the engine. `mask` is the master switch;
+    /// `mask_when_polite` additionally tone-gates it (see
+    /// [`EngineConfig::mask_when_polite`]). Inert until a censor list is loaded
+    /// via [`set_masker`](Self::set_masker).
+    pub fn set_masking(&mut self, mask: bool, mask_when_polite: bool) {
+        self.config.mask = mask;
+        self.config.mask_when_polite = mask_when_polite;
+    }
+
     /// Coarse register of the recent window, from the tone meter — `Neutral`
     /// until a marker list is loaded and enough recent signal accrues.
     pub fn register(&self) -> Register {
@@ -1052,6 +1062,21 @@ mod tests {
             top_forms(&e, "долбоёб", 5).iter().any(|f| f.contains('@')),
             "ungated masking should mask in any window"
         );
+    }
+
+    #[test]
+    fn set_masking_toggles_at_runtime() {
+        use crate::mask::Masker;
+        // Engine built with masking off (default); a shell flips it on later.
+        let tsv = "долбоёб\tдолбоёб\t100\tNOUN\n";
+        let mut e = Engine::new(Lexicon::from_tsv_str(tsv).unwrap());
+        e.set_masker(Masker::from_list_str("долбоёб\n").unwrap());
+        let masked = |e: &Engine| top_forms(e, "долбоёб", 5).iter().any(|f| f.contains('@'));
+        assert!(!masked(&e), "off by default");
+        e.set_masking(true, false);
+        assert!(masked(&e), "runtime enable");
+        e.set_masking(false, false);
+        assert!(!masked(&e), "runtime disable");
     }
 
     #[test]
