@@ -37,6 +37,7 @@ pub mod paradigm;
 pub mod rank;
 pub mod recency;
 pub mod shortcuts;
+pub mod tone;
 
 pub use context::{Context, ContextModel, NoContext};
 pub use edit::EditCosts;
@@ -48,3 +49,4 @@ pub use paradigm::{CaseForm, Gender, Number, ParadigmGroup, Paradigms};
 pub use rank::Weights;
 pub use recency::SessionCache;
 pub use shortcuts::{ShortcutError, Shortcuts};
+pub use tone::{Register, ToneError, ToneMeter};

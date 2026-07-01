@@ -1,0 +1,45 @@
+# Tone/register markers for the window-tone meter (crates/abbrev-core/src/tone.rs).
+# Format: word_or_lemma<TAB>sign, sign a float in [-1, 1] (or bare +/- for ±1).
+# Positive = polite/formal, negative = crude/slangy. Keys are normalized, so any
+# spelling/case matches. A deliberately small seed — the meter re-reads the file,
+# so expand per product/locale without code changes.
+#
+# The tone meter reads *only* the committed-word stream (no chat-id, no new
+# permission; see §5.1). Register drives the masking gate (§5.2) and, later, a
+# register ranking signal.
+
+# --- polite / formal ---
+пожалуйста	+
+пожалуй	0.5
+спасибо	0.8
+благодарю	0.9
+здравствуйте	1
+здравствуй	0.6
+добрый	0.4
+доброе	0.4
+уважаемый	0.9
+извините	0.8
+простите	0.7
+будьте	0.6
+прошу	0.6
+всего	0.3
+доброго	0.5
+приятно	0.4
+
+# --- crude / slangy ---
+блин	-0.4
+чёрт	-0.3
+фигня	-0.5
+хрень	-0.6
+жесть	-0.4
+офигеть	-0.6
+бесит	-0.5
+доёбывать	-0.9
+долбоёб	-1
+мудак	-0.9
+блядь	-1
+хуй	-1
+пиздец	-1
+ебать	-1
+нахер	-0.8
+нафиг	-0.5
