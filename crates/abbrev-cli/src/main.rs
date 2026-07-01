@@ -1,7 +1,7 @@
 //! Developer CLI: the fastest feedback loop for engine work.
 //!
 //! ```text
-//! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped] [--paradigms hold.tsv]
+//! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped] [--paradigms hold.tsv] [--mask list.txt]
 //! abbrev repl [--lexicon path.tsv]
 //! abbrev bench data/bench/basic.tsv [--lexicon path.tsv] [--errors fails.tsv]
 //! abbrev bench cases.tsv --recency [--noise N] [--lexicon path.tsv]
@@ -21,7 +21,8 @@ use std::io::{BufRead, Write as _};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use abbrev_core::{BigramModel, Context, Engine, Lexicon, Paradigms, Shortcuts};
+use abbrev_core::engine::EngineConfig;
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Masker, Paradigms, Shortcuts};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -47,6 +48,7 @@ struct CommonOpts {
     lm: Option<BigramModel>,
     shortcuts: Option<Shortcuts>,
     paradigms: Option<Paradigms>,
+    masker: Option<Masker>,
     limit: usize,
     context: Context,
     positional: Vec<String>,
@@ -59,8 +61,21 @@ fn build_engine(
     lm: Option<BigramModel>,
     shortcuts: Option<Shortcuts>,
     paradigms: Option<Paradigms>,
+    masker: Option<Masker>,
 ) -> Engine {
-    let mut engine = Engine::new(opts_lexicon);
+    // A `--mask` list flips the (otherwise off-by-default) masking gate on, so
+    // the CLI actually offers the masked twins; without it the engine keeps
+    // its default config.
+    let mut engine = match &masker {
+        Some(_) => Engine::with_config(
+            opts_lexicon,
+            EngineConfig {
+                mask: true,
+                ..EngineConfig::default()
+            },
+        ),
+        None => Engine::new(opts_lexicon),
+    };
     if let Some(lm) = lm {
         engine.set_context_model(Box::new(lm));
     }
@@ -70,6 +85,9 @@ fn build_engine(
     if let Some(p) = paradigms {
         engine.set_paradigms(p);
     }
+    if let Some(m) = masker {
+        engine.set_masker(m);
+    }
     engine
 }
 
@@ -78,6 +96,7 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut lm_path: Option<String> = None;
     let mut shortcuts_path: Option<String> = None;
     let mut paradigms_path: Option<String> = None;
+    let mut mask_path: Option<String> = None;
     let mut limit = 5usize;
     let mut context = Context::default();
     let mut positional = Vec::new();
@@ -95,6 +114,9 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             }
             "--paradigms" => {
                 paradigms_path = Some(it.next().ok_or("--paradigms needs a path")?.to_string());
+            }
+            "--mask" => {
+                mask_path = Some(it.next().ok_or("--mask needs a path")?.to_string());
             }
             "--limit" => {
                 limit = it
@@ -142,11 +164,20 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => None,
     };
+    let masker = match mask_path {
+        Some(path) => {
+            let list = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read mask list {path}: {e}"))?;
+            Some(Masker::from_list_str(&list).map_err(|e| e.to_string())?)
+        }
+        None => None,
+    };
     Ok(CommonOpts {
         lexicon,
         lm,
         shortcuts,
         paradigms,
+        masker,
         limit,
         context,
         positional,
@@ -163,7 +194,13 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
     let Some(input) = opts.positional.first() else {
         return fail("suggest needs an input word, e.g. `abbrev suggest првт`");
     };
-    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
+    let engine = build_engine(
+        opts.lexicon,
+        opts.lm,
+        opts.shortcuts,
+        opts.paradigms,
+        opts.masker,
+    );
     let started = Instant::now();
     if grouped {
         // The two-level strip: one line per lemma, variants on "hold".
@@ -206,7 +243,13 @@ fn cmd_repl(args: Vec<&str>) -> ExitCode {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let mut engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
+    let mut engine = build_engine(
+        opts.lexicon,
+        opts.lm,
+        opts.shortcuts,
+        opts.paradigms,
+        opts.masker,
+    );
     eprintln!("abbrev repl — введите сокращение; `!N` принимает вариант N; пустая строка — выход");
     let stdin = std::io::stdin();
     let mut last_input = String::new();
@@ -313,7 +356,13 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
-    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
+    let engine = build_engine(
+        opts.lexicon,
+        opts.lm,
+        opts.shortcuts,
+        opts.paradigms,
+        opts.masker,
+    );
     let mut m = Metrics::default();
     let mut by_tag: BTreeMap<String, Metrics> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
@@ -538,7 +587,13 @@ fn run_recency(opts: CommonOpts, path: &str, noise: usize) -> ExitCode {
     if cases.is_empty() {
         return fail("no cases found");
     }
-    let mut engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
+    let mut engine = build_engine(
+        opts.lexicon,
+        opts.lm,
+        opts.shortcuts,
+        opts.paradigms,
+        opts.masker,
+    );
     // Distractor pool: normalized lexicon forms, collected before the mutable
     // borrow of the engine in `recency_eval`.
     let distractors: Vec<String> = engine

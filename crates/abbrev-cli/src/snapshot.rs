@@ -47,7 +47,13 @@ pub fn cmd_snapshot(args: Vec<&str>) -> ExitCode {
         Err(e) => return fail(&format!("cannot read {cases_path}: {e}")),
     };
     let limit = opts.limit;
-    let engine = build_engine(opts.lexicon, opts.lm, opts.shortcuts, opts.paradigms);
+    let engine = build_engine(
+        opts.lexicon,
+        opts.lm,
+        opts.shortcuts,
+        opts.paradigms,
+        opts.masker,
+    );
 
     // input<TAB>context  →  ranked "form:score|form:score|…" (best form per
     // lemma group, in strip order). Context is part of the key because it

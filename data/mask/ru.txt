@@ -1,0 +1,55 @@
+# Profanity lemmas for the opt-in masking layer (crates/abbrev-core/src/mask.rs).
+# One lemma per line; blank lines and `#` comments are ignored. Keys are
+# normalized, so list the dictionary base form in any spelling/case — `ё` and
+# uppercase fold automatically. Matching is by *lemma*, not substring, so an
+# innocent word that merely contains these letters (e.g. `застраховать`) is
+# never masked.
+#
+# This is a deliberately small seed of the canonical Russian mat roots and
+# their everyday derivatives — enough to demonstrate the mechanism and to test
+# against. Expand per product/locale needs; the masker re-reads the file, no
+# code change required. The list is *what* to mask; *when* to mask is host
+# policy (EngineConfig.mask + the future register/tone gate, §5.1).
+
+# хуй и производные
+хуй
+хуёвый
+хуйня
+охуеть
+охуенный
+нахуй
+похуй
+
+# пизда и производные
+пизда
+пиздец
+пиздатый
+пиздеть
+пиздёж
+спиздить
+распиздяй
+
+# ебать и производные
+ебать
+ебаный
+ёбнутый
+выебать
+заебать
+наебать
+наёбка
+проёб
+уёбок
+ебло
+
+# блядь и производные
+блядь
+блядский
+
+# мудак / долбоёб и прочее
+мудак
+мудила
+долбоёб
+гондон
+залупа
+дрочить
+манда
