@@ -12,10 +12,11 @@ on:
         description: "mawo-nlp-data release tag to pull name dictionaries from"
         default: "v1.0.0"
 
-# Needs to open a PR with the regenerated artifact.
+# Pushes the regenerated artifact to a staging branch. Actions cannot *create*
+# PRs under this org's settings, but it can push a branch — a human opens the
+# PR from bot/ru-names in the UI.
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: build-names
@@ -53,43 +54,54 @@ jobs:
       - name: Generate ru-names.tsv
         run: |
           set -euo pipefail
-          # Combined given names + the 2025-updated surname and patronymic
-          # lists. names.py reads plain or gzipped UTF-8 text and inflects each
-          # name through mawo-pymorphy3; the locator tolerates archive layout.
-          first=$(find mawo -name 'first_all_2025.dict' | head -1)
-          last=$(find mawo -name 'last_updated_2025.dict' | head -1)
-          middle=$(find mawo -name 'middle.dict' | head -1)
-          test -n "$first"  || { echo "::error::missing first_all_2025.dict";  exit 1; }
-          test -n "$last"   || { echo "::error::missing last_updated_2025.dict"; exit 1; }
-          test -n "$middle" || { echo "::error::missing middle.dict";           exit 1; }
+          # Feed BOTH the base lists (first/last/middle — these hold the bulk,
+          # ~95k surnames) and the small 2025 update deltas; names.py dedups by
+          # (form, lemma). The base dicts are the coverage; the *_2025 deltas
+          # only add a handful, so missing either is fine but base is essential.
+          args=()
+          while IFS= read -r f; do args+=(--first "$f"); done < <(
+            find mawo \( -name 'first.dict' -o -name 'first_all_2025.dict' \))
+          while IFS= read -r f; do args+=(--surname "$f"); done < <(
+            find mawo \( -name 'last.dict' -o -name 'last_updated_2025.dict' \))
+          while IFS= read -r f; do args+=(--patronymic "$f"); done < <(
+            find mawo -name 'middle.dict')
+          echo "names.py inputs: ${args[*]}"
+          test ${#args[@]} -gt 0 || { echo "::error::no name dicts found"; exit 1; }
           python3 tools/lexicon-builder/scripts/names.py \
-            --first "$first" --surname "$last" --patronymic "$middle" \
-            -o data/lexicons/ru-names.tsv
-          echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows:"
+            "${args[@]}" -o data/lexicons/ru-names.tsv
+          echo "Generated $(wc -l < data/lexicons/ru-names.tsv) rows, $(du -h data/lexicons/ru-names.tsv | cut -f1):"
           head -8 data/lexicons/ru-names.tsv
+          # Version the artifact gzipped (~1.2 MB vs ~12 MB raw); the build
+          # gunzips it before merging into the engine lexicon. -n drops the
+          # mtime/name header so the .gz is byte-stable across runs.
+          gzip -9 -n data/lexicons/ru-names.tsv
+          echo "Gzipped to $(du -h data/lexicons/ru-names.tsv.gz | cut -f1)."
 
-      # Always keep the artifact downloadable, even if the PR step is skipped.
-      - name: Upload ru-names.tsv artifact
+      # Always keep the artifact downloadable, even if the push step is skipped.
+      - name: Upload ru-names.tsv.gz artifact
         uses: actions/upload-artifact@v4
         with:
           name: ru-names
-          path: data/lexicons/ru-names.tsv
+          path: data/lexicons/ru-names.tsv.gz
 
-      - name: Open PR with the regenerated lexicon
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: bot/ru-names
-          base: ${{ github.ref_name }}
-          add-paths: data/lexicons/ru-names.tsv
-          commit-message: "data(names): regenerate ru-names.tsv from mawo-nlp-data"
-          title: "data(names): refresh ru-names.tsv from mawo-nlp-data ${{ inputs.release_tag }}"
-          body: |
-            Automated regeneration of `data/lexicons/ru-names.tsv` from the
-            Natasha name dictionaries (mawo-nlp-data `${{ inputs.release_tag }}`,
-            MIT) via `tools/lexicon-builder/scripts/names.py` + mawo-pymorphy3.
-
-            Review before merge:
-            - **size** — declined surnames make this large; decide whether to
-              version it or gate by frequency / ship gzipped;
-            - downstream: merge with `ru-50k.tsv` and re-run `paradigms.py`
-              over the union so names get hold-groups too.
+      # Actions can't create a PR under this org's settings, so push the
+      # artifact to a staging branch instead and let a human open the PR.
+      - name: Push ru-names.tsv.gz to bot/ru-names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b bot/ru-names
+          git add data/lexicons/ru-names.tsv.gz
+          if git diff --cached --quiet; then
+            echo "ru-names.tsv.gz unchanged — nothing to push."
+            exit 0
+          fi
+          git commit -m "data(names): regenerate ru-names.tsv.gz from mawo-nlp-data ${{ inputs.release_tag }}"
+          # Bot-owned, regenerated each run, so force-push is fine.
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            bot/ru-names
+          echo "::notice::Pushed data/lexicons/ru-names.tsv.gz to bot/ru-names — open a PR from the GitHub UI."

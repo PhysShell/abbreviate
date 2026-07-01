@@ -93,8 +93,9 @@ fn build_engine(
 
 fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut lexicon_path: Option<String> = None;
+    let mut extra_lexicon_paths: Vec<String> = Vec::new();
     let mut lm_path: Option<String> = None;
-    let mut shortcuts_path: Option<String> = None;
+    let mut shortcuts_paths: Vec<String> = Vec::new();
     let mut paradigms_path: Option<String> = None;
     let mut mask_path: Option<String> = None;
     let mut limit = 5usize;
@@ -106,11 +107,21 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             "--lexicon" => {
                 lexicon_path = Some(it.next().ok_or("--lexicon needs a path")?.to_string());
             }
+            "--extra-lexicon" => {
+                // Repeatable: fold an opt-in source (e.g. the gunzipped names
+                // lexicon) into the base. Not forced on any platform.
+                extra_lexicon_paths
+                    .push(it.next().ok_or("--extra-lexicon needs a path")?.to_string());
+            }
             "--lm" => {
                 lm_path = Some(it.next().ok_or("--lm needs a path")?.to_string());
             }
             "--shortcuts" => {
-                shortcuts_path = Some(it.next().ok_or("--shortcuts needs a path")?.to_string());
+                // Repeatable: the exact-match layer is one namespace, so the
+                // conventional shorthand (data/shortcuts/ru.tsv) and the
+                // transliteration terms (data/translit/ru-tech.tsv) load
+                // together. Same-key lines stack as ordered expansions.
+                shortcuts_paths.push(it.next().ok_or("--shortcuts needs a path")?.to_string());
             }
             "--paradigms" => {
                 paradigms_path = Some(it.next().ok_or("--paradigms needs a path")?.to_string());
@@ -132,7 +143,7 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             other => positional.push(other.to_string()),
         }
     }
-    let lexicon = match lexicon_path {
+    let mut lexicon = match lexicon_path {
         Some(path) => {
             let tsv = std::fs::read_to_string(&path)
                 .map_err(|e| format!("cannot read lexicon {path}: {e}"))?;
@@ -140,6 +151,13 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => Lexicon::demo(),
     };
+    for path in &extra_lexicon_paths {
+        let tsv = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read extra lexicon {path}: {e}"))?;
+        lexicon
+            .extend_from_tsv_str(&tsv)
+            .map_err(|e| format!("{path}: {e}"))?;
+    }
     let lm = match lm_path {
         Some(path) => {
             let tsv = std::fs::read_to_string(&path)
@@ -148,13 +166,20 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => None,
     };
-    let shortcuts = match shortcuts_path {
-        Some(path) => {
-            let tsv = std::fs::read_to_string(&path)
-                .map_err(|e| format!("cannot read shortcuts {path}: {e}"))?;
-            Some(Shortcuts::from_tsv_str(&tsv).map_err(|e| e.to_string())?)
+    let shortcuts = if shortcuts_paths.is_empty() {
+        None
+    } else {
+        // Concatenate all shortcut sources; from_tsv_str merges keys across
+        // them (same-key lines stack).
+        let mut tsv = String::new();
+        for path in &shortcuts_paths {
+            tsv.push_str(
+                &std::fs::read_to_string(path)
+                    .map_err(|e| format!("cannot read shortcuts {path}: {e}"))?,
+            );
+            tsv.push('\n');
         }
-        None => None,
+        Some(Shortcuts::from_tsv_str(&tsv).map_err(|e| e.to_string())?)
     };
     let paradigms = match paradigms_path {
         Some(path) => {

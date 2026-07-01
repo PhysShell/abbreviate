@@ -5,9 +5,10 @@ Russian given names, surnames and patronymics decline, so the long tail of
 proper names this IME otherwise can't reach (`ивн`->Иван, `пткв`->Петкова) is
 best served by folding the *declined surface forms* into the lexicon, exactly
 like ordinary words. This reads one name per line and emits the engine TSV
-`form<TAB>lemma<TAB>freq<TAB>tags`, ready to merge into the surface-form
-lexicon (concatenate the output as data/lexicons/ru-names.tsv; the normal
-build sorts and folds it in alongside ru-50k.tsv).
+`form<TAB>lemma<TAB>freq<TAB>tags`, ready to merge alongside ru-50k.tsv. This
+script writes plain TSV; the build/CI versions it gzipped
+(data/lexicons/ru-names.tsv.gz, ~1.2 MB vs ~12 MB) and gunzips before merging,
+keeping lexicon-builder dependency-free.
 
 Source of the name lists: the Natasha name dictionaries redistributed in
 mawo-nlp-data (first/last/middle, ~113k entries; MIT, (c) Alexander
@@ -134,13 +135,13 @@ def main() -> int:
         return 1
 
     def pick(parses, grammeme):
-        # Prefer the parse pymorphy recognises as this kind of name; fall back
-        # to the first noun parse so an unknown-but-declinable name still
-        # inflects rather than being dropped.
-        named = next((p for p in parses if grammeme in p.tag), None)
-        if named is not None:
-            return named
-        return next((p for p in parses if p.tag.POS == "NOUN"), None)
+        # Only emit forms pymorphy actually tags as this kind of name. An
+        # earlier NOUN fallback let unknown tokens through as guessed common
+        # nouns (wrong gender/animacy: Ивановаа, Ивановва) and pulled in
+        # non-name homographs (Ивановец the resident, Иваново the Geox place,
+        # an invented plural lemma Ивановичь) — so drop anything not tagged
+        # Name/Surn/Patr rather than inflect a wrong reading.
+        return next((p for p in parses if grammeme in p.tag), None)
 
     # (form, lemma) -> tags. The CASES order puts nomn first, so a syncretic
     # form (Иванова = gent & accs) keeps a single, deterministic tag.
