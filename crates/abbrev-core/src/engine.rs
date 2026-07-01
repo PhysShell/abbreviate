@@ -984,10 +984,18 @@ mod tests {
         e.set_tone_meter(tm);
 
         let masked = |e: &Engine| top_forms(e, "долбоёб", 5).iter().any(|f| f.contains('@'));
+        // The grouped API shares the gate — assert it too, so a future
+        // divergence between `masked` and `masked_groups` is caught.
+        let grouped_masked = |e: &Engine| {
+            e.suggest_grouped("долбоёб", &Context::default(), 5)
+                .iter()
+                .any(|g| g.best.form.contains('@'))
+        };
 
         // Neutral window (no markers noted yet): gated → no twin.
         assert_eq!(e.register(), Register::Neutral);
         assert!(!masked(&e), "neutral window must not mask");
+        assert!(!grouped_masked(&e), "neutral grouped window must not mask");
 
         // Polite window → twin offered.
         for _ in 0..3 {
@@ -995,6 +1003,7 @@ mod tests {
         }
         assert_eq!(e.register(), Register::Polite);
         assert!(masked(&e), "polite window must mask");
+        assert!(grouped_masked(&e), "polite grouped window must mask");
 
         // Crude window → gate closes again.
         e.reset_session();
@@ -1003,6 +1012,7 @@ mod tests {
         }
         assert_eq!(e.register(), Register::Crude);
         assert!(!masked(&e), "crude window must not mask");
+        assert!(!grouped_masked(&e), "crude grouped window must not mask");
     }
 
     #[test]

@@ -62,7 +62,9 @@ pub struct ToneMeter {
     score: f32,
     /// Decayed count of recent markers (confidence).
     mass: f32,
-    half_life: f32,
+    /// Per-word decay factor `0.5^(1/half_life)`, precomputed — `note` runs on
+    /// a per-committed-word hot path and the half-life never changes.
+    decay: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,11 +89,12 @@ impl ToneMeter {
     }
 
     pub fn with_half_life(half_life: f32) -> Self {
+        let half_life = half_life.max(f32::MIN_POSITIVE);
         Self {
             markers: HashMap::new(),
             score: 0.0,
             mass: 0.0,
-            half_life: half_life.max(f32::MIN_POSITIVE),
+            decay: 0.5f32.powf(1.0 / half_life),
         }
     }
 
@@ -140,9 +143,8 @@ impl ToneMeter {
     /// adds its sign. Non-marker words carry no sign — they only age the
     /// estimate.
     pub fn note(&mut self, word: &str) {
-        let decay = 0.5f32.powf(1.0 / self.half_life);
-        self.score *= decay;
-        self.mass *= decay;
+        self.score *= self.decay;
+        self.mass *= self.decay;
         if let Some(&sign) = self.markers.get(&normalize(word)) {
             self.score += sign;
             self.mass += 1.0;

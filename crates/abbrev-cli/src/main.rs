@@ -66,6 +66,13 @@ struct CommonOpts {
 
 /// Engine over the options' lexicon, with the bigram LM, conventional
 /// shortcuts and hold-popup paradigms plugged in when their flags were given.
+///
+/// **Consumes** the heavy fields of `opts` (`lexicon`, `lm`, `shortcuts`,
+/// `paradigms`, `masker`, `tone`) via `take`/`mem::replace` to avoid cloning
+/// them into the engine. `opts` is left moved-out in those slots, so call this
+/// once per command — a second call on the same `opts` would build a degraded
+/// engine. The lightweight fields (`limit`, `context`, `window`, ...) are left
+/// intact for the caller.
 fn build_engine(opts: &mut CommonOpts) -> Engine {
     let lexicon = std::mem::replace(&mut opts.lexicon, Lexicon::demo());
     // A `--mask` list flips the (otherwise off-by-default) masking gate on, so
