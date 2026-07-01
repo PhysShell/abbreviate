@@ -1,5 +1,6 @@
 package com.physshell.abbreviate.engine
 
+import android.util.Log
 import uniffi.abbrev_ffi.AbbrevEngine
 
 /**
@@ -58,12 +59,29 @@ class UniffiSuggestionPort(private val engine: AbbrevEngine) : SuggestionPort {
             maskList: String? = null,
             toneMarkers: String? = null,
         ): UniffiSuggestionPort {
+            // Only the lexicon is required: a malformed one throws and the host
+            // falls back to the demo engine. The optional layers are loaded
+            // defensively — a bad LM / shortcuts / mask / tone asset is logged
+            // and skipped, never taking the real lexicon down with it.
             val engine = AbbrevEngine.fromLexiconTsv(lexiconTsv)
-            lmTsv?.let { engine.loadLanguageModel(it) }
-            shortcutsTsv?.let { engine.loadShortcuts(it) }
-            maskList?.let { engine.loadMaskList(it) }
-            toneMarkers?.let { engine.loadToneMarkers(it) }
+            engine.tryLoadLayer("language model", lmTsv) { loadLanguageModel(it) }
+            engine.tryLoadLayer("shortcuts", shortcutsTsv) { loadShortcuts(it) }
+            engine.tryLoadLayer("mask list", maskList) { loadMaskList(it) }
+            engine.tryLoadLayer("tone markers", toneMarkers) { loadToneMarkers(it) }
             return UniffiSuggestionPort(engine)
+        }
+
+        private inline fun AbbrevEngine.tryLoadLayer(
+            label: String,
+            data: String?,
+            load: AbbrevEngine.(String) -> Unit,
+        ) {
+            if (data == null) return
+            try {
+                load(data)
+            } catch (e: Exception) {
+                Log.w("Abbrev", "skipping malformed $label asset", e)
+            }
         }
     }
 }
