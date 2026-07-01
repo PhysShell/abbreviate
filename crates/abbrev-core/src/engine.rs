@@ -19,6 +19,7 @@ use crate::paradigm::{ParadigmGroup, Paradigms};
 use crate::rank::{Signals, Weights, common_ending_len, common_prefix_len, score};
 use crate::recency::SessionCache;
 use crate::shortcuts::Shortcuts;
+use crate::tone::{Register, ToneMeter};
 
 /// Endings used to route an input like `тстрние` into the right
 /// reverse-suffix bucket. Ordered longest-first at lookup time.
@@ -58,6 +59,13 @@ pub struct EngineConfig {
     /// nothing and changes nothing until a host opts in (the *when* is shell
     /// policy; see `mask.rs` and `docs/RESEARCH-RECENCY-CACHE.md` §5.2).
     pub mask: bool,
+    /// Gate masking on window tone (§5.1): when set, twins are offered only
+    /// while the register meter reads `Polite` — soften profanity when writing
+    /// politely, leave it alone in a crude/among-friends window where it is
+    /// affectionate. Requires [`mask`](Self::mask) and a loaded tone-marker
+    /// list; ignored otherwise. Off by default (mask always, when `mask` is
+    /// on), preserving the pre-tone behaviour.
+    pub mask_when_polite: bool,
     pub weights: Weights,
     pub costs: EditCosts,
 }
@@ -72,6 +80,7 @@ impl Default for EngineConfig {
             typo_tolerance: true,
             fuzzy_skeleton_min_len: 3,
             mask: false,
+            mask_when_polite: false,
             weights: Weights::default(),
             costs: EditCosts::default(),
         }
@@ -110,6 +119,7 @@ pub struct Engine {
     context_model: Box<dyn ContextModel>,
     shortcuts: Shortcuts,
     masker: Masker,
+    tone: ToneMeter,
     paradigms: Option<Paradigms>,
     config: EngineConfig,
 }
@@ -173,6 +183,7 @@ impl Engine {
             context_model: Box::new(NoContext),
             shortcuts: Shortcuts::default(),
             masker: Masker::default(),
+            tone: ToneMeter::new(),
             paradigms: None,
             config,
         }
@@ -200,6 +211,23 @@ impl Engine {
     /// [`EngineConfig::mask`] is also set (the *when* is the host's call).
     pub fn set_masker(&mut self, masker: Masker) {
         self.masker = masker;
+    }
+
+    /// Loads the tone/register marker meter (§5.1). Consumes the same
+    /// [`note_word`](Self::note_word) stream; read via [`register`](Self::register).
+    pub fn set_tone_meter(&mut self, tone: ToneMeter) {
+        self.tone = tone;
+    }
+
+    /// Coarse register of the recent window, from the tone meter — `Neutral`
+    /// until a marker list is loaded and enough recent signal accrues.
+    pub fn register(&self) -> Register {
+        self.tone.register()
+    }
+
+    /// Signed window tone in `[-1, 1]` (`+` polite, `-` crude, `0` no signal).
+    pub fn tone(&self) -> f32 {
+        self.tone.tone()
     }
 
     /// Replaces the ranking weights without rebuilding indexes — weights do
@@ -256,6 +284,15 @@ impl Engine {
         self.masked(out, limit)
     }
 
+    /// Whether masking should emit twins right now: enabled, a non-empty
+    /// censor list, and — when tone-gated (§5.1) — a `Polite` window. Reading
+    /// the meter here makes §5.2 a live client of §5.1.
+    fn masking_active(&self) -> bool {
+        self.config.mask
+            && !self.masker.is_empty()
+            && (!self.config.mask_when_polite || self.tone.register() == Register::Polite)
+    }
+
     /// Inserts a masked twin (`долбоёб → дол@#&б`) immediately after every
     /// suggestion whose lemma is censored, then truncates to `limit`. The
     /// original is left in place — masking *offers*, never substitutes — so a
@@ -264,7 +301,7 @@ impl Engine {
     /// costs nothing. Run as a post-step so it never disturbs ranking or the
     /// surface-form dedup above.
     fn masked(&self, items: Vec<Suggestion>, limit: usize) -> Vec<Suggestion> {
-        if !self.config.mask || self.masker.is_empty() {
+        if !self.masking_active() {
             let mut items = items;
             items.truncate(limit);
             return items;
@@ -554,7 +591,7 @@ impl Engine {
     /// group (single form, no variants) after every group whose lemma is
     /// censored, then truncates to `limit`. No-op by default.
     fn masked_groups(&self, groups: Vec<SuggestionGroup>, limit: usize) -> Vec<SuggestionGroup> {
-        if !self.config.mask || self.masker.is_empty() {
+        if !self.masking_active() {
             let mut groups = groups;
             groups.truncate(limit);
             return groups;
@@ -645,6 +682,7 @@ impl Engine {
     /// committed word); the cache is local and never persisted or synced.
     pub fn note_word(&mut self, word: &str) {
         self.session.note(word);
+        self.tone.note(word);
     }
 
     /// Clears the session recency cache — the shell calls this when the
@@ -652,6 +690,7 @@ impl Engine {
     /// across contexts.
     pub fn reset_session(&mut self) {
         self.session.reset();
+        self.tone.reset();
     }
 
     /// History blob for the shell to persist (privacy stays shell-side).
@@ -917,6 +956,63 @@ mod tests {
         let groups = e.suggest_grouped("блять", &Context::default(), 20);
         let masked_groups = groups.iter().filter(|g| g.best.form.contains('@')).count();
         assert_eq!(masked_groups, 1, "twin group should appear once");
+    }
+
+    #[test]
+    fn tone_gate_masks_only_in_a_polite_window() {
+        use crate::mask::Masker;
+        use crate::tone::{Register, ToneMeter};
+        let tsv = "долбоёб\tдолбоёб\t100\tNOUN\n";
+        let cfg = EngineConfig {
+            mask: true,
+            mask_when_polite: true,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::with_config(Lexicon::from_tsv_str(tsv).unwrap(), cfg);
+        e.set_masker(Masker::from_list_str("долбоёб\n").unwrap());
+        let mut tm = ToneMeter::new();
+        tm.markers_from_tsv_str("пожалуйста\t+\nхрень\t-\n")
+            .unwrap();
+        e.set_tone_meter(tm);
+
+        let masked = |e: &Engine| top_forms(e, "долбоёб", 5).iter().any(|f| f.contains('@'));
+
+        // Neutral window (no markers noted yet): gated → no twin.
+        assert_eq!(e.register(), Register::Neutral);
+        assert!(!masked(&e), "neutral window must not mask");
+
+        // Polite window → twin offered.
+        for _ in 0..3 {
+            e.note_word("пожалуйста");
+        }
+        assert_eq!(e.register(), Register::Polite);
+        assert!(masked(&e), "polite window must mask");
+
+        // Crude window → gate closes again.
+        e.reset_session();
+        for _ in 0..3 {
+            e.note_word("хрень");
+        }
+        assert_eq!(e.register(), Register::Crude);
+        assert!(!masked(&e), "crude window must not mask");
+    }
+
+    #[test]
+    fn ungated_masking_ignores_tone() {
+        use crate::mask::Masker;
+        // mask on, mask_when_polite off (PR #29 behaviour): always masks,
+        // regardless of window tone.
+        let tsv = "долбоёб\tдолбоёб\t100\tNOUN\n";
+        let cfg = EngineConfig {
+            mask: true,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::with_config(Lexicon::from_tsv_str(tsv).unwrap(), cfg);
+        e.set_masker(Masker::from_list_str("долбоёб\n").unwrap());
+        assert!(
+            top_forms(&e, "долбоёб", 5).iter().any(|f| f.contains('@')),
+            "ungated masking should mask in any window"
+        );
     }
 
     #[test]

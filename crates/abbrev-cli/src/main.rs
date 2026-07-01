@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! abbrev suggest првт [--lexicon path.tsv] [--limit 5] [--context "слова до"] [--grouped] [--paradigms hold.tsv] [--mask list.txt]
+//! abbrev suggest долбоёб --mask mask.txt --tone tone.tsv --mask-when-polite --window "здравствуйте пожалуйста"
 //! abbrev repl [--lexicon path.tsv]
 //! abbrev bench data/bench/basic.tsv [--lexicon path.tsv] [--errors fails.tsv]
 //! abbrev bench cases.tsv --recency [--noise N] [--lexicon path.tsv]
@@ -11,6 +12,10 @@
 //! `bench --recency` runs every case cold (empty session) vs warm
 //! (`note_word(expected)` then `--noise N` distractors) and reports the
 //! cold→warm top-1/top-3 lift — the measurement behind tuning `w_recency`.
+//!
+//! `--window "…"` pre-notes committed words (priming recency + the tone meter)
+//! before the query; with `--tone` and `--mask-when-polite`, a masked twin is
+//! offered only when that window reads `Polite` (§5.1 gates §5.2).
 
 mod generate;
 mod snapshot;
@@ -22,7 +27,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use abbrev_core::engine::EngineConfig;
-use abbrev_core::{BigramModel, Context, Engine, Lexicon, Masker, Paradigms, Shortcuts};
+use abbrev_core::{BigramModel, Context, Engine, Lexicon, Masker, Paradigms, Shortcuts, ToneMeter};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -49,6 +54,11 @@ struct CommonOpts {
     shortcuts: Option<Shortcuts>,
     paradigms: Option<Paradigms>,
     masker: Option<Masker>,
+    tone: Option<ToneMeter>,
+    mask_when_polite: bool,
+    /// Committed words to pre-note (the recent window), priming recency + tone
+    /// before the query — lets `suggest` exercise session-dependent behaviour.
+    window: Vec<String>,
     limit: usize,
     context: Context,
     positional: Vec<String>,
@@ -56,37 +66,41 @@ struct CommonOpts {
 
 /// Engine over the options' lexicon, with the bigram LM, conventional
 /// shortcuts and hold-popup paradigms plugged in when their flags were given.
-fn build_engine(
-    opts_lexicon: Lexicon,
-    lm: Option<BigramModel>,
-    shortcuts: Option<Shortcuts>,
-    paradigms: Option<Paradigms>,
-    masker: Option<Masker>,
-) -> Engine {
+fn build_engine(opts: &mut CommonOpts) -> Engine {
+    let lexicon = std::mem::replace(&mut opts.lexicon, Lexicon::demo());
     // A `--mask` list flips the (otherwise off-by-default) masking gate on, so
-    // the CLI actually offers the masked twins; without it the engine keeps
-    // its default config.
-    let mut engine = match &masker {
-        Some(_) => Engine::with_config(
-            opts_lexicon,
+    // the CLI actually offers the masked twins; `--mask-when-polite` then
+    // tone-gates it. Without `--mask` the engine keeps its default config.
+    let mut engine = if opts.masker.is_some() {
+        Engine::with_config(
+            lexicon,
             EngineConfig {
                 mask: true,
+                mask_when_polite: opts.mask_when_polite,
                 ..EngineConfig::default()
             },
-        ),
-        None => Engine::new(opts_lexicon),
+        )
+    } else {
+        Engine::new(lexicon)
     };
-    if let Some(lm) = lm {
+    if let Some(lm) = opts.lm.take() {
         engine.set_context_model(Box::new(lm));
     }
-    if let Some(sc) = shortcuts {
+    if let Some(sc) = opts.shortcuts.take() {
         engine.set_shortcuts(sc);
     }
-    if let Some(p) = paradigms {
+    if let Some(p) = opts.paradigms.take() {
         engine.set_paradigms(p);
     }
-    if let Some(m) = masker {
+    if let Some(m) = opts.masker.take() {
         engine.set_masker(m);
+    }
+    if let Some(t) = opts.tone.take() {
+        engine.set_tone_meter(t);
+    }
+    // Prime the recent window (recency + tone) from `--window`.
+    for word in &opts.window {
+        engine.note_word(word);
     }
     engine
 }
@@ -97,6 +111,9 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     let mut shortcuts_path: Option<String> = None;
     let mut paradigms_path: Option<String> = None;
     let mut mask_path: Option<String> = None;
+    let mut tone_path: Option<String> = None;
+    let mut mask_when_polite = false;
+    let mut window: Vec<String> = Vec::new();
     let mut limit = 5usize;
     let mut context = Context::default();
     let mut positional = Vec::new();
@@ -117,6 +134,16 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
             }
             "--mask" => {
                 mask_path = Some(it.next().ok_or("--mask needs a path")?.to_string());
+            }
+            "--tone" => {
+                tone_path = Some(it.next().ok_or("--tone needs a path")?.to_string());
+            }
+            "--mask-when-polite" => {
+                mask_when_polite = true;
+            }
+            "--window" => {
+                let words = it.next().ok_or("--window needs a string")?;
+                window = words.split_whitespace().map(String::from).collect();
             }
             "--limit" => {
                 limit = it
@@ -172,12 +199,30 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
         }
         None => None,
     };
+    let tone = match tone_path {
+        Some(path) => {
+            let tsv = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read tone markers {path}: {e}"))?;
+            let mut meter = ToneMeter::new();
+            meter
+                .markers_from_tsv_str(&tsv)
+                .map_err(|e| e.to_string())?;
+            Some(meter)
+        }
+        None => None,
+    };
+    if mask_when_polite && masker.is_none() {
+        return Err("--mask-when-polite requires --mask".to_string());
+    }
     Ok(CommonOpts {
         lexicon,
         lm,
         shortcuts,
         paradigms,
         masker,
+        tone,
+        mask_when_polite,
+        window,
         limit,
         context,
         positional,
@@ -187,24 +232,18 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
 fn cmd_suggest(args: Vec<&str>) -> ExitCode {
     let grouped = args.contains(&"--grouped");
     let args = args.into_iter().filter(|a| *a != "--grouped").collect();
-    let opts = match parse_opts(args) {
+    let mut opts = match parse_opts(args) {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let Some(input) = opts.positional.first() else {
+    let Some(input) = opts.positional.first().cloned() else {
         return fail("suggest needs an input word, e.g. `abbrev suggest првт`");
     };
-    let engine = build_engine(
-        opts.lexicon,
-        opts.lm,
-        opts.shortcuts,
-        opts.paradigms,
-        opts.masker,
-    );
+    let engine = build_engine(&mut opts);
     let started = Instant::now();
     if grouped {
         // The two-level strip: one line per lemma, variants on "hold".
-        let groups = engine.suggest_grouped(input, &opts.context, opts.limit);
+        let groups = engine.suggest_grouped(&input, &opts.context, opts.limit);
         let elapsed = started.elapsed();
         for (i, g) in groups.iter().enumerate() {
             let variants = if g.variants.is_empty() {
@@ -220,10 +259,16 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
                 g.best.score
             );
         }
-        eprintln!("-- {} groups in {:?}", groups.len(), elapsed);
+        eprintln!(
+            "-- {} groups in {:?} (register: {:?}, tone: {:+.2})",
+            groups.len(),
+            elapsed,
+            engine.register(),
+            engine.tone()
+        );
         return ExitCode::SUCCESS;
     }
-    let suggestions = engine.suggest(input, &opts.context, opts.limit);
+    let suggestions = engine.suggest(&input, &opts.context, opts.limit);
     let elapsed = started.elapsed();
     for (i, s) in suggestions.iter().enumerate() {
         println!(
@@ -234,22 +279,22 @@ fn cmd_suggest(args: Vec<&str>) -> ExitCode {
             s.score
         );
     }
-    eprintln!("-- {} candidates in {:?}", suggestions.len(), elapsed);
+    eprintln!(
+        "-- {} candidates in {:?} (register: {:?}, tone: {:+.2})",
+        suggestions.len(),
+        elapsed,
+        engine.register(),
+        engine.tone()
+    );
     ExitCode::SUCCESS
 }
 
 fn cmd_repl(args: Vec<&str>) -> ExitCode {
-    let opts = match parse_opts(args) {
+    let mut opts = match parse_opts(args) {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
-    let mut engine = build_engine(
-        opts.lexicon,
-        opts.lm,
-        opts.shortcuts,
-        opts.paradigms,
-        opts.masker,
-    );
+    let mut engine = build_engine(&mut opts);
     eprintln!("abbrev repl — введите сокращение; `!N` принимает вариант N; пустая строка — выход");
     let stdin = std::io::stdin();
     let mut last_input = String::new();
@@ -342,7 +387,7 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
     if noise_given && !recency {
         return fail("--noise requires --recency");
     }
-    let opts = match parse_opts(rest) {
+    let mut opts = match parse_opts(rest) {
         Ok(o) => o,
         Err(e) => return fail(&e),
     };
@@ -356,13 +401,7 @@ fn cmd_bench(args: Vec<&str>) -> ExitCode {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
     };
-    let engine = build_engine(
-        opts.lexicon,
-        opts.lm,
-        opts.shortcuts,
-        opts.paradigms,
-        opts.masker,
-    );
+    let engine = build_engine(&mut opts);
     let mut m = Metrics::default();
     let mut by_tag: BTreeMap<String, Metrics> = BTreeMap::new();
     let mut latencies_us: Vec<u128> = Vec::new();
@@ -560,7 +599,7 @@ fn recency_eval(
 /// `abbrev bench <cases> --recency [--noise N]`: reports the session-cache
 /// lift (cold vs warm top-1/top-3) so `w_recency` can be tuned against a real
 /// measurement. Works on any `abbrev gen` output.
-fn run_recency(opts: CommonOpts, path: &str, noise: usize) -> ExitCode {
+fn run_recency(mut opts: CommonOpts, path: &str, noise: usize) -> ExitCode {
     let text = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot read {path}: {e}")),
@@ -587,13 +626,7 @@ fn run_recency(opts: CommonOpts, path: &str, noise: usize) -> ExitCode {
     if cases.is_empty() {
         return fail("no cases found");
     }
-    let mut engine = build_engine(
-        opts.lexicon,
-        opts.lm,
-        opts.shortcuts,
-        opts.paradigms,
-        opts.masker,
-    );
+    let mut engine = build_engine(&mut opts);
     // Distractor pool: normalized lexicon forms, collected before the mutable
     // borrow of the engine in `recency_eval`.
     let distractors: Vec<String> = engine
