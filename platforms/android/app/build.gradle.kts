@@ -68,7 +68,7 @@ dependencies {
 // src/main/assets are git-ignored. aapt compresses them in the APK; the engine
 // loads them off the main thread at startup.
 val bundleEngineData by tasks.registering(Copy::class) {
-    description = "Copy the lexicon / LM / shortcuts from /data into assets."
+    description = "Copy the lexicon / LM / shortcuts / mask / tone from /data into assets."
     val data = file("${rootProject.projectDir}/../../data")
     val requiredLexicon = data.resolve("lexicons/ru-50k.tsv")
     // Fail loudly rather than silently shipping the demo-only runtime path.
@@ -79,6 +79,10 @@ val bundleEngineData by tasks.registering(Copy::class) {
     from(requiredLexicon) { rename { "lexicon.tsv" } }
     from(data.resolve("lm/ru-lm.tsv")) { rename { "lm.tsv" } }
     from(data.resolve("shortcuts/ru.tsv")) { rename { "shortcuts.tsv" } }
+    // Profanity mask + tone markers (§5.1/§5.2). Optional at runtime: masking
+    // stays off until the user enables it in settings.
+    from(data.resolve("mask/ru.txt")) { rename { "mask.txt" } }
+    from(data.resolve("tone/ru.tsv")) { rename { "tone.tsv" } }
     into(layout.projectDirectory.dir("src/main/assets"))
 }
 tasks.named("preBuild") { dependsOn(bundleEngineData) }

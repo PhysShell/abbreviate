@@ -9,7 +9,10 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use abbrev_core::morph::Case;
-use abbrev_core::{BigramModel, Context, Engine, Gender, Lexicon, Number, Paradigms, Shortcuts};
+use abbrev_core::{
+    BigramModel, Context, Engine, Gender, Lexicon, Masker, Number, Paradigms,
+    Register as CoreRegister, Shortcuts, ToneMeter,
+};
 
 uniffi::setup_scaffolding!();
 
@@ -44,6 +47,25 @@ pub enum GrammaticalGender {
     Masculine,
     Feminine,
     Neuter,
+}
+
+/// Coarse register of the recent window, from the tone meter (§5.1). Drives
+/// the profanity-masking gate and can colour the shell's UI.
+#[derive(uniffi::Enum)]
+pub enum Register {
+    Polite,
+    Neutral,
+    Crude,
+}
+
+impl From<CoreRegister> for Register {
+    fn from(r: CoreRegister) -> Self {
+        match r {
+            CoreRegister::Polite => Register::Polite,
+            CoreRegister::Neutral => Register::Neutral,
+            CoreRegister::Crude => Register::Crude,
+        }
+    }
 }
 
 /// Russian grammatical case (the six declension cases).
@@ -116,6 +138,8 @@ pub enum AbbrevError {
     InvalidLexicon { reason: String },
     InvalidLanguageModel { reason: String },
     InvalidShortcuts { reason: String },
+    InvalidMaskList { reason: String },
+    InvalidToneMarkers { reason: String },
 }
 
 impl fmt::Display for AbbrevError {
@@ -126,6 +150,8 @@ impl fmt::Display for AbbrevError {
                 write!(f, "invalid language model: {reason}")
             }
             Self::InvalidShortcuts { reason } => write!(f, "invalid shortcuts: {reason}"),
+            Self::InvalidMaskList { reason } => write!(f, "invalid mask list: {reason}"),
+            Self::InvalidToneMarkers { reason } => write!(f, "invalid tone markers: {reason}"),
         }
     }
 }
@@ -266,6 +292,59 @@ impl AbbrevEngine {
         Ok(())
     }
 
+    /// Loads the profanity-masking censor list (one lemma per line; §5.2).
+    /// Inert until [`set_masking`](Self::set_masking) turns the gate on — the
+    /// list is *what* to mask, the gate is *when*.
+    pub fn load_mask_list(&self, list: String) -> Result<(), AbbrevError> {
+        let masker = Masker::from_list_str(&list).map_err(|e| AbbrevError::InvalidMaskList {
+            reason: e.to_string(),
+        })?;
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_masker(masker);
+        Ok(())
+    }
+
+    /// Loads the tone/register marker list (`word<TAB>sign`, sign in `[-1, 1]`;
+    /// §5.1). Feeds off the same `note_word` stream; read via
+    /// [`register`](Self::register). Enables the `mask_when_polite` gate.
+    pub fn load_tone_markers(&self, tsv: String) -> Result<(), AbbrevError> {
+        let mut meter = ToneMeter::new();
+        meter
+            .markers_from_tsv_str(&tsv)
+            .map_err(|e| AbbrevError::InvalidToneMarkers {
+                reason: e.to_string(),
+            })?;
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_tone_meter(meter);
+        Ok(())
+    }
+
+    /// Turns profanity masking on/off at runtime, bound to a user setting.
+    /// `enabled` is the master switch; `when_polite` additionally tone-gates it
+    /// so a masked twin is offered only in a polite window (§5.1 gates §5.2).
+    /// Off by default and inert until a mask list is loaded.
+    pub fn set_masking(&self, enabled: bool, when_polite: bool) {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .set_masking(enabled, when_polite);
+    }
+
+    /// Coarse register of the recent window (from the tone meter), for a shell
+    /// that wants to show or act on it. `Neutral` until markers are loaded and
+    /// recent signal accrues.
+    pub fn register(&self) -> Register {
+        self.inner
+            .lock()
+            .expect("engine mutex poisoned")
+            .register()
+            .into()
+    }
+
     /// Records a confirmed suggestion (picked and kept).
     pub fn accept(&self, input: String, form: String) {
         self.inner
@@ -367,6 +446,45 @@ mod tests {
     #[test]
     fn rejects_bad_lexicon() {
         assert!(AbbrevEngine::from_lexicon_tsv("каша".into()).is_err());
+    }
+
+    #[test]
+    fn masking_gate_over_ffi() {
+        let engine =
+            AbbrevEngine::from_lexicon_tsv("долбоёб\tдолбоёб\t100\tNOUN\n".into()).unwrap();
+        engine.load_mask_list("долбоёб\n".into()).unwrap();
+        engine
+            .load_tone_markers("пожалуйста\t+\nхрень\t-\n".into())
+            .unwrap();
+        let masked = |e: &AbbrevEngine| {
+            e.suggest("долбоёб".into(), vec![], 5)
+                .iter()
+                .any(|s| s.form.contains('@'))
+        };
+
+        // Off by default even with a list loaded.
+        assert!(!masked(&engine));
+
+        // Ungated: masks in any window.
+        engine.set_masking(true, false);
+        assert!(masked(&engine));
+
+        // Tone-gated: only in a polite window.
+        engine.set_masking(true, true);
+        assert!(matches!(engine.register(), Register::Neutral));
+        assert!(!masked(&engine), "neutral window must not mask");
+        for _ in 0..3 {
+            engine.note_word("пожалуйста".into());
+        }
+        assert!(matches!(engine.register(), Register::Polite));
+        assert!(masked(&engine), "polite window must mask");
+    }
+
+    #[test]
+    fn rejects_bad_mask_and_tone() {
+        let engine = AbbrevEngine::with_demo_lexicon();
+        assert!(engine.load_mask_list("два слова".into()).is_err());
+        assert!(engine.load_tone_markers("слово\tвверх".into()).is_err());
     }
 
     #[test]
