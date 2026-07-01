@@ -214,6 +214,12 @@ fn parse_opts(args: Vec<&str>) -> Result<CommonOpts, String> {
     if mask_when_polite && masker.is_none() {
         return Err("--mask-when-polite requires --mask".to_string());
     }
+    // A tone gate with no markers would just mask ungated (see
+    // `EngineConfig::mask_when_polite`); on the CLI that is almost certainly a
+    // forgotten `--tone`, so reject it rather than surprise the user.
+    if mask_when_polite && tone.is_none() {
+        return Err("--mask-when-polite requires --tone".to_string());
+    }
     Ok(CommonOpts {
         lexicon,
         lm,

@@ -62,9 +62,10 @@ pub struct EngineConfig {
     /// Gate masking on window tone (§5.1): when set, twins are offered only
     /// while the register meter reads `Polite` — soften profanity when writing
     /// politely, leave it alone in a crude/among-friends window where it is
-    /// affectionate. Requires [`mask`](Self::mask) and a loaded tone-marker
-    /// list; ignored otherwise. Off by default (mask always, when `mask` is
-    /// on), preserving the pre-tone behaviour.
+    /// affectionate. Requires [`mask`](Self::mask). With **no** tone-marker
+    /// list loaded there is nothing to read tone from, so the gate is inert and
+    /// masking stays ungated (mask always) rather than silently going dark.
+    /// Off by default, preserving the pre-tone behaviour.
     pub mask_when_polite: bool,
     pub weights: Weights,
     pub costs: EditCosts,
@@ -288,9 +289,16 @@ impl Engine {
     /// censor list, and — when tone-gated (§5.1) — a `Polite` window. Reading
     /// the meter here makes §5.2 a live client of §5.1.
     fn masking_active(&self) -> bool {
-        self.config.mask
-            && !self.masker.is_empty()
-            && (!self.config.mask_when_polite || self.tone.register() == Register::Polite)
+        if !self.config.mask || self.masker.is_empty() {
+            return false;
+        }
+        // The tone gate needs a marker list to read tone from. With an empty
+        // meter there is no basis to gate on (`register()` is always
+        // `Neutral`), so masking stays ungated rather than silently going dark
+        // — matching the field doc.
+        !self.config.mask_when_polite
+            || self.tone.is_empty()
+            || self.tone.register() == Register::Polite
     }
 
     /// Inserts a masked twin (`долбоёб → дол@#&б`) immediately after every
@@ -995,6 +1003,27 @@ mod tests {
         }
         assert_eq!(e.register(), Register::Crude);
         assert!(!masked(&e), "crude window must not mask");
+    }
+
+    #[test]
+    fn tone_gate_without_markers_masks_ungated() {
+        use crate::mask::Masker;
+        // mask_when_polite set, but no tone meter installed: the gate has
+        // nothing to read, so masking must stay ungated (mask always) rather
+        // than silently emitting no twins.
+        let tsv = "долбоёб\tдолбоёб\t100\tNOUN\n";
+        let cfg = EngineConfig {
+            mask: true,
+            mask_when_polite: true,
+            ..EngineConfig::default()
+        };
+        let mut e = Engine::with_config(Lexicon::from_tsv_str(tsv).unwrap(), cfg);
+        e.set_masker(Masker::from_list_str("долбоёб\n").unwrap());
+        assert_eq!(e.register(), Register::Neutral);
+        assert!(
+            top_forms(&e, "долбоёб", 5).iter().any(|f| f.contains('@')),
+            "empty tone meter must not disable masking"
+        );
     }
 
     #[test]
